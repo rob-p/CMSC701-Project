@@ -15,8 +15,8 @@ make install
 
 ## Generating test data
 ```
-mkdir test-inputs
-cd test-inputs
+mkdir test-data
+cd test-data
 
 # 1.5 MB compressed
 wget https://raw.githubusercontent.com/umd-cmsc701/project_0_test_data/main/test_input/salmonella.fa
@@ -27,4 +27,10 @@ wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR2859629
 
 # 595 MB compressed
 wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR28592514 -O nematode.fq.gzip
+```
+
+## Running this project
+```
+make
+./zran.out test-data/salmonella.fa.gz 400
 ```
