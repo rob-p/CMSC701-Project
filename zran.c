@@ -1,3 +1,25 @@
+/* zran.c -- example of deflate stream indexing and random access
+ * Copyright (C) 2005, 2012, 2018, 2023, 2024 Mark Adler
+ * For conditions of distribution and use, see copyright notice in zlib.h
+ * Version 1.5  4 Feb 2024  Mark Adler */
+
+/* Version History:
+ 1.0  29 May 2005  First version
+ 1.1  29 Sep 2012  Fix memory reallocation error
+ 1.2  14 Oct 2018  Handle gzip streams with multiple members
+                   Add a header file to facilitate usage in applications
+ 1.3  18 Feb 2023  Permit raw deflate streams as well as zlib and gzip
+                   Permit crossing gzip member boundaries when extracting
+                   Support a size_t size when extracting (was an int)
+                   Do a binary search over the index for an access point
+                   Expose the access point type to enable save and load
+ 1.4  13 Apr 2023  Add a NOPRIME define to not use inflatePrime()
+ 1.5   4 Feb 2024  Set returned index to NULL on an index build error
+                   Stop decoding once request is satisfied
+                   Provide a reusable inflate engine in the index
+                   Allocate the dictionaries to reduce memory usage
+ */
+
 // Illustrate the use of Z_BLOCK, inflatePrime(), and inflateSetDictionary()
 // for random access of a compressed file. A file containing a raw deflate
 // stream is provided on the command line. The compressed stream is decoded in
@@ -45,7 +67,6 @@
 
 #define WINSIZE 32768U      // sliding window size
 #define CHUNK 16384         // file input buffer size
-#define INFLATEPRIME inflatePrime
 
 // See comments in zran.h.
 void deflate_index_free(struct deflate_index *index) {
@@ -227,6 +248,94 @@ int deflate_index_build(FILE *in, off_t span, struct deflate_index **built) {
     *built = index;
     return index->have;
 }
+
+#ifdef NOPRIME
+// Support zlib versions before 1.2.3 (July 2005), or incomplete zlib clones
+// that do not have inflatePrime().
+
+#  define INFLATEPRIME inflatePreface
+
+// Append the low bits bits of value to in[] at bit position *have, updating
+// *have. value must be zero above its low bits bits. bits must be positive.
+// This assumes that any bits above the *have bits in the last byte are zeros.
+// That assumption is preserved on return, as any bits above *have + bits in
+// the last byte written will be set to zeros.
+static inline void append_bits(unsigned value, int bits,
+                               unsigned char *in, int *have) {
+    in += *have >> 3;           // where the first bits from value will go
+    int k = *have & 7;          // the number of bits already there
+    *have += bits;
+    if (k)
+        *in |= value << k;      // write value above the low k bits
+    else
+        *in = value;
+    k = 8 - k;                  // the number of bits just appended
+    while (bits > k) {
+        value >>= k;            // drop the bits appended
+        bits -= k;
+        k = 8;                  // now at a byte boundary
+        *++in = value;
+    }
+}
+
+// Insert enough bits in the form of empty deflate blocks in front of the
+// low bits bits of value, in order to bring the sequence to a byte boundary.
+// Then feed that to inflate(). This does what inflatePrime() does, except that
+// a negative value of bits is not supported. bits must be in 0..16. If the
+// arguments are invalid, Z_STREAM_ERROR is returned. Otherwise the return
+// value from inflate() is returned.
+static int inflatePreface(z_stream *strm, int bits, int value) {
+    // Check input.
+    if (strm == Z_NULL || bits < 0 || bits > 16)
+        return Z_STREAM_ERROR;
+    if (bits == 0)
+        return Z_OK;
+    value &= (2 << (bits - 1)) - 1;
+
+    // An empty dynamic block with an odd number of bits (95). The high bit of
+    // the last byte is unused.
+    static const unsigned char dyn[] = {
+        4, 0xe0, 0x81, 8, 0, 0, 0, 0, 0x20, 0xa8, 0xab, 0x1f
+    };
+    const int dynlen = 95;          // number of bits in the block
+
+    // Build an input buffer for inflate that is a multiple of eight bits in
+    // length, and that ends with the low bits bits of value.
+    unsigned char in[(dynlen + 3 * 10 + 16 + 7) / 8];
+    int have = 0;
+    if (bits & 1) {
+        // Insert an empty dynamic block to get to an odd number of bits, so
+        // when bits bits from value are appended, we are at an even number of
+        // bits.
+        memcpy(in, dyn, sizeof(dyn));
+        have = dynlen;
+    }
+    while ((have + bits) & 7)
+        // Insert empty fixed blocks until appending bits bits would put us on
+        // a byte boundary. This will insert at most three fixed blocks.
+        append_bits(2, 10, in, &have);
+
+    // Append the bits bits from value, which takes us to a byte boundary.
+    append_bits(value, bits, in, &have);
+
+    // Deliver the input to inflate(). There is no output space provided, but
+    // inflate() can't get stuck waiting on output not ingesting all of the
+    // provided input. The reason is that there will be at most 16 bits of
+    // input from value after the empty deflate blocks (which themselves
+    // generate no output). At least ten bits are needed to generate the first
+    // output byte from a fixed block. The last two bytes of the buffer have to
+    // be ingested in order to get ten bits, which is the most that value can
+    // occupy.
+    strm->avail_in = have >> 3;
+    strm->next_in = in;
+    strm->avail_out = 0;
+    strm->next_out = in;                // not used, but can't be NULL
+    return inflate(strm, Z_NO_FLUSH);
+}
+
+#else
+#  define INFLATEPRIME inflatePrime
+#endif
 
 // See comments in zran.h.
 ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
@@ -416,28 +525,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     fprintf(stderr, "zran: built index with %d access points\n", len);
-
-    // Save the index to a file for later use.
-    char *filename = malloc(strlen(argv[1]) + 6);
-    if (filename == NULL) {
-        fprintf(stderr, "zran: out of memory\n");
-        deflate_index_free(index);
-        fclose(in);
-        return 1;
-    }
-    strcpy(filename, argv[1]);
-    strcat(filename, ".index");
-
-    // Open the index file for writing.
-    FILE *idx = fopen(filename, "wb");
-    if (idx == NULL)
-        fprintf(stderr, "zran: could not open %s for writing\n", filename);
-    else {
-        fwrite(index, sizeof(struct deflate_index), 1, idx);
-        fwrite(index->list, sizeof(point_t), index->have, idx);
-        fclose(idx);
-        fprintf(stderr, "zran: wrote index to %s\n", filename);
-    }
 
     // Use index by reading some bytes from an arbitrary offset.
     unsigned char buf[LEN];
