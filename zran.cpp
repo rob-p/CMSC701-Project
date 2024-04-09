@@ -90,7 +90,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
     if (index->have == index->mode) {
         // The list is full. Make it bigger.
         index->mode = index->mode ? index->mode << 1 : 8;
-        point_t *next = realloc(index->list, sizeof(point_t) * index->mode);
+        point_t *next = (point_t *)realloc(index->list, sizeof(point_t) * index->mode);
         if (next == NULL) {
             deflate_index_free(index);
             return NULL;
@@ -109,7 +109,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
     next->in = in;
     next->bits = index->strm.data_type & 7;
     next->dict = out - beg > WINSIZE ? WINSIZE : (unsigned)(out - beg);
-    next->window = malloc(next->dict);
+    next->window = (unsigned char*) malloc(next->dict);
     if (next->window == NULL) {
         deflate_index_free(index);
         return NULL;
@@ -136,7 +136,7 @@ int deflate_index_build(FILE *in, off_t span, struct deflate_index **built) {
     *built = NULL;
 
     // Create and initialize the index list.
-    struct deflate_index *index = malloc(sizeof(struct deflate_index));
+    struct deflate_index *index = (struct deflate_index*) malloc(sizeof(struct deflate_index));
     if (index == NULL)
         return Z_MEM_ERROR;
     index->have = 0;

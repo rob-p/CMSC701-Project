@@ -1,8 +1,8 @@
-CC=gcc
+CC=g++
 CFLAGS=-I.
 
-zran: zran.c
-	$(CC) -o zran.out zran.c -lz
+zran: zran.cpp
+	$(CC) -o zran.out zran.cpp -lz
 
 all: zran
 
