@@ -2,9 +2,9 @@ CC=gcc
 CFLAGS=-I.
 
 zran: zran.c
-	$(CC) -o zran zran.c -lz
+	$(CC) -o zran.out zran.c -lz
 
 all: zran
 
 clean:
-	rm -f zran
+	rm -f zran.out
