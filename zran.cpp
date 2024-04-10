@@ -141,15 +141,6 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
         fwrite(&index->have, sizeof(index->have), 1, out) != 1)
         return Z_ERRNO;
 
-    // Write strm
-    if (fwrite(&index->strm.avail_in, sizeof(index->strm.avail_in), 1, out) != 1 ||
-        fwrite(&index->strm.avail_out, sizeof(index->strm.avail_out), 1, out) != 1 ||
-        fwrite(&index->strm.data_type, sizeof(index->strm.data_type), 1, out) != 1 ||
-        fwrite(&index->strm.zalloc, sizeof(index->strm.zalloc), 1, out) != 1 ||
-        fwrite(&index->strm.zfree, sizeof(index->strm.zfree), 1, out) != 1 ||
-        fwrite(&index->strm.opaque, sizeof(index->strm.opaque), 1, out) != 1)
-        return Z_ERRNO;
-
     // Write the access points.
     for (int i = 0; i < index->have; i++) {
         point_t *point = index->list + i;
@@ -174,17 +165,6 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
     if (fread(&index->mode, sizeof(index->mode), 1, in) != 1 ||
         fread(&index->length, sizeof(index->length), 1, in) != 1 ||
         fread(&index->have, sizeof(index->have), 1, in) != 1) {
-        free(index);
-        return Z_ERRNO;
-    }
-
-    // Read strm
-    if (fread(&index->strm.avail_in, sizeof(index->strm.avail_in), 1, in) != 1 ||
-        fread(&index->strm.avail_out, sizeof(index->strm.avail_out), 1, in) != 1 ||
-        fread(&index->strm.data_type, sizeof(index->strm.data_type), 1, in) != 1 ||
-        fread(&index->strm.zalloc, sizeof(index->strm.zalloc), 1, in) != 1 ||
-        fread(&index->strm.zfree, sizeof(index->strm.zfree), 1, in) != 1 ||
-        fread(&index->strm.opaque, sizeof(index->strm.opaque), 1, in) != 1) {
         free(index);
         return Z_ERRNO;
     }
@@ -214,6 +194,12 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
             return Z_ERRNO;
         }
     }
+
+    // Initialize the inflation state.
+    index->strm.zalloc = Z_NULL;
+    index->strm.zfree = Z_NULL;
+    index->strm.opaque = Z_NULL;
+    inflateInit2(&index->strm, index->mode);
 
     // Return the index.
     *built = index;
@@ -395,13 +381,16 @@ int deflate_index_build(FILE *in, off_t span, struct deflate_index **built) {
 ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
                                 off_t offset, unsigned char *buf, size_t len) {
     // Do a quick sanity check on the index.
-    if (index == NULL || index->have < 1 || index->list[0].out != 0 ||
-        index->strm.state == Z_NULL)
+    if (index == NULL || index->have < 1 || index->list[0].out != 0) {
+        std::cout << "zran: index is not ready" << std::endl;
         return Z_STREAM_ERROR;
+    }
 
     // If nothing to extract, return zero bytes extracted.
-    if (len == 0 || offset < 0 || offset >= index->length)
+    if (len == 0 || offset < 0 || offset >= index->length) {
+        std::cout << "zran: nothing to extract" << std::endl;
         return 0;
+    }
 
     // Find the access point closest to but not after offset.
     int lo = -1, hi = index->have;
@@ -417,15 +406,19 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
 
     // Initialize the input file and prime the inflate engine to start there.
     int ret = fseeko(in, point->in - (point->bits ? 1 : 0), SEEK_SET);
-    if (ret == -1)
+    if (ret == -1) {
+        std::cout << "zran: seek error" << std::endl;
         return Z_ERRNO;
+    }
     int ch = 0;
     if (point->bits && (ch = getc(in)) == EOF)
         return ferror(in) ? Z_ERRNO : Z_BUF_ERROR;
     index->strm.avail_in = 0;
     ret = inflateReset2(&index->strm, RAW);
-    if (ret != Z_OK)
+    if (ret != Z_OK) {
+        std::cout << "zran: inflateReset2 error" << std::endl;
         return ret;
+    }
     if (point->bits)
         INFLATEPRIME(&index->strm, point->bits, ch >> (8 - point->bits));
     inflateSetDictionary(&index->strm, point->window, point->dict);
@@ -487,9 +480,11 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
                 drop -= index->strm.avail_in;
                 index->strm.avail_in = 0;
                 do {
-                    if (getc(in) == EOF)
+                    if (getc(in) == EOF) {
                         // The input does not have a complete trailer.
+                        std::cout << "zran: unexpected EOF" << std::endl;
                         return ferror(in) ? Z_ERRNO : Z_BUF_ERROR;
+                    }
                 } while (--drop);
             }
 
@@ -521,7 +516,15 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
     } while (ret == Z_OK);
 
     // Return the number of uncompressed bytes read into buf, or the error.
-    return ret == Z_OK || ret == Z_STREAM_END ? len - left : ret;
+    // return ret == Z_OK || ret == Z_STREAM_END ? len - left : ret;
+    
+    if (ret == Z_OK || ret == Z_STREAM_END) {
+        return len - left;
+    } else {
+        std::cout << "zran: inflate error" << std::endl;
+        return ret;
+    }
+
 }
 
 #define SPAN 1048576L       // desired distance between access points
@@ -576,7 +579,7 @@ int main(int argc, char **argv) {
         fclose(index_file);
     } else {
         // Build index.
-        int len = deflate_index_build(in, SPAN, &index);
+        len = deflate_index_build(in, SPAN, &index);
     }
 
     if (len < 0) {
@@ -656,7 +659,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "zran: extraction failed: %s error\n",
                 got == Z_MEM_ERROR ? "out of memory" : "input corrupted");
     else {
-        // fwrite(buf, 1, got, stdout);
+        fwrite(buf, 1, got, stdout);
         fprintf(stderr, "zran: extracted %ld bytes at %lld\n", got, offset);
     }
 
