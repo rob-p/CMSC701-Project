@@ -121,6 +121,18 @@ void print_index(struct deflate_index *index) {
 
 }
 
+// See comments in zran.h.
+void deflate_index_free(struct deflate_index *index) {
+    if (index != NULL) {
+        size_t i = index->have;
+        while (i)
+            free(index->list[--i].window);
+        free(index->list);
+        inflateEnd(&index->strm);
+        free(index);
+    }
+}
+
 // Save index to file.
 int deflate_index_save(FILE *out, struct deflate_index *index) {
     // Write metadata
@@ -177,23 +189,28 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
         return Z_ERRNO;
     }
 
-    // Allocate the access points.
-    index->list = (point_t *)malloc(sizeof(point_t) * index->have);
+    // Read the access points.
+    index->list = (point_t *) malloc(sizeof(point_t) * index->have);
     if (index->list == NULL) {
-        free(index);
+        deflate_index_free(index);
         return Z_MEM_ERROR;
     }
-
-    // Read the access points.
     for (int i = 0; i < index->have; i++) {
         point_t *point = index->list + i;
         if (fread(&point->out, sizeof(point->out), 1, in) != 1 ||
             fread(&point->in, sizeof(point->in), 1, in) != 1 ||
             fread(&point->bits, sizeof(point->bits), 1, in) != 1 ||
-            fread(&point->dict, sizeof(point->dict), 1, in) != 1 ||
-            fread(point->window, 1, point->dict, in) != point->dict) {
-            free(index->list);
-            free(index);
+            fread(&point->dict, sizeof(point->dict), 1, in) != 1) {
+            deflate_index_free(index);
+            return Z_ERRNO;
+        }
+        point->window = (unsigned char*) malloc(point->dict);
+        if (point->window == NULL) {
+            deflate_index_free(index);
+            return Z_MEM_ERROR;
+        }
+        if (fread(point->window, 1, point->dict, in) != point->dict) {
+            deflate_index_free(index);
             return Z_ERRNO;
         }
     }
@@ -201,18 +218,6 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
     // Return the index.
     *built = index;
     return index->have;
-}
-
-// See comments in zran.h.
-void deflate_index_free(struct deflate_index *index) {
-    if (index != NULL) {
-        size_t i = index->have;
-        while (i)
-            free(index->list[--i].window);
-        free(index->list);
-        inflateEnd(&index->strm);
-        free(index);
-    }
 }
 
 // Add an access point to the list. If out of memory, deallocate the existing
@@ -529,7 +534,7 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
 // data is extracted from there instead.
 int main(int argc, char **argv) {
     // Open the input file.
-    if (argc < 2 || argc > 3) {
+    if (argc < 2 || argc > 4) {
         fprintf(stderr, "usage: zran file.raw [offset]\n");
         return 1;
     }
@@ -541,18 +546,39 @@ int main(int argc, char **argv) {
 
     // Get optional offset.
     off_t offset = -1;
-    if (argc == 3) {
+    if (argc > 2) {
         char *end;
-        offset = strtoll(argv[2], &end, 10);
-        if (*end || offset < 0) {
-            fprintf(stderr, "zran: %s is not a valid offset\n", argv[2]);
+        offset = strtoll(argv[2], &end, 0);
+        if (*end) {
+            fprintf(stderr, "zran: invalid offset %s\n", argv[2]);
+            fclose(in);
             return 1;
         }
     }
+    fprintf(stderr, "zran: extracting %d bytes at offset %lld\n", LEN, offset);
 
-    // Build index.
+    // Either build an index or read one from a file
     struct deflate_index *index = NULL;
-    int len = deflate_index_build(in, SPAN, &index);
+    int len;
+
+    // Read index from file if provided
+    if (argc == 4) {
+        fprintf(stderr, "zran: attempting to read index from %s\n", argv[3]);
+
+        FILE *index_file = fopen(argv[3], "rb");
+        if (index_file == NULL) {
+            fprintf(stderr, "zran: could not open %s for reading\n", argv[3]);
+            fclose(in);
+            return 1;
+        }
+
+        len = deflate_index_load(index_file, &index);
+        fclose(index_file);
+    } else {
+        // Build index.
+        int len = deflate_index_build(in, SPAN, &index);
+    }
+
     if (len < 0) {
         fclose(in);
         switch (len) {
@@ -573,7 +599,50 @@ int main(int argc, char **argv) {
         }
         return 1;
     }
-    fprintf(stderr, "zran: built index with %d access points\n", len);
+
+    if (argc == 4) {
+        fprintf(stderr, "zran: read index with %d access points!\n", len);
+    } else {
+        fprintf(stderr, "zran: built index with %d access points!\n", len);
+
+        // Save index to file
+        char *filename = (char *) malloc(strlen(argv[1]) + 6);
+        if (filename == NULL) {
+            fprintf(stderr, "zran: out of memory\n");
+            deflate_index_free(index);
+            fclose(in);
+            return 1;
+        }
+        strcpy(filename, argv[1]);
+        strcat(filename, ".index");
+
+        fprintf(stderr, "zran: attempting to write index to %s\n", filename);
+
+        // Open the index file for writing.
+        FILE *idx = fopen(filename, "wb");
+        if (idx == NULL) {
+            fprintf(stderr, "zran: could not open %s for writing\n", filename);
+            deflate_index_free(index);
+            fclose(in);
+            return 1;
+        }
+
+        // Write the index to the file.
+        len = deflate_index_save(idx, index);
+        if (len != 0) {
+            fclose(idx);
+            fprintf(stderr, "zran: write error on %s\n", filename);
+            deflate_index_free(index);
+            fclose(in);
+            return 1;
+        }
+        fprintf(stderr, "zran: wrote index with %d access points to %s\n", index->have, filename);
+
+        // Clean up.
+        fclose(idx);
+        free(filename);
+    }
+
 
     // Print the index (to verify correctness when reading)
     print_index(index);
