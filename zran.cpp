@@ -558,7 +558,7 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-    fprintf(stderr, "zran: extracting %d bytes at offset %lld\n", LEN, offset);
+    fprintf(stderr, "zran: extracting %d bytes at offset %ld\n", LEN, offset);
 
     // Either build an index or read one from a file
     struct deflate_index *index = NULL;
@@ -602,11 +602,13 @@ int main(int argc, char **argv) {
         }
         return 1;
     }
-
+    
     if (argc == 4) {
         fprintf(stderr, "zran: read index with %d access points!\n", len);
+        print_index(index);
     } else {
         fprintf(stderr, "zran: built index with %d access points!\n", len);
+        print_index(index);
 
         // Save index to file
         char *filename = (char *) malloc(strlen(argv[1]) + 6);
@@ -641,14 +643,13 @@ int main(int argc, char **argv) {
         }
         fprintf(stderr, "zran: wrote index with %d access points to %s\n", index->have, filename);
 
-        // Clean up.
+        // Clean up and exit
         fclose(idx);
         free(filename);
+        deflate_index_free(index);
+        fclose(in);
+        return 0;
     }
-
-
-    // Print the index (to verify correctness when reading)
-    print_index(index);
 
     // Use index by reading some bytes from an arbitrary offset.
     unsigned char buf[LEN];
@@ -660,7 +661,7 @@ int main(int argc, char **argv) {
                 got == Z_MEM_ERROR ? "out of memory" : "input corrupted");
     else {
         fwrite(buf, 1, got, stdout);
-        fprintf(stderr, "zran: extracted %ld bytes at %lld\n", got, offset);
+        fprintf(stderr, "\nzran: extracted %ld bytes at %ld using index read from disk\n", got, offset);
     }
 
     // Clean up and exit.

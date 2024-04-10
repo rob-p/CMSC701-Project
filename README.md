@@ -30,7 +30,19 @@ wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR2859251
 ```
 
 ## Running this project
+
+1. Build everything
 ```
 make
-./zran.out test-data/salmonella.fa.gz 400
+```
+
+2. Generate index file
+```
+./zran.out test-data/salmonella.fa.gz
+```
+
+3. Use generated index file to extract `LEN` (16384) bytes from an offset:
+
+```
+./zran.out test-data/salmonella.fa.gz 400 ./test-data/salmonella.fa.gz.index
 ```
