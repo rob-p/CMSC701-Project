@@ -20,7 +20,13 @@ Number of records = 67748
 
 | Method                       | #Reader Threads | #Consumer Threads | Time to read (ms) | Total Time (ms) |
 |------------------------------|-----------------|-------------------|-------------------|-----------------|
-| Sequencial Read using kseq++ | NA              | NA                | 8607                | 25860              |
+| Sequencial Read using kseq++ | NA              | NA                | 8607              | 25860              |
+| FQFeeder                     | 1               | 1                 | NA                | 18627              |
+| FQFeeder                     | 1               | 2                 | NA                | 9891              |
+| FQFeeder                     | 1               | 3                 | NA                | 8852              |
+| FQFeeder                     | 1               | 4                 | NA                | 8771              |
+| FQFeeder                     | 1               | 5                 | NA                | 8828              |
+| FQFeeder                     | 1               | 6                 | NA                | 8832              |
 ### dataset_B.fa.gz
 Size on disk = 941.7MB
 Number of records = 194
@@ -34,7 +40,13 @@ Number of records = 194
 
 | Method                       | #Reader Threads | #Consumer Threads | Time to read (ms) | Total Time (ms) |
 |------------------------------|-----------------|-------------------|-------------------|-----------------|
-| Sequencial Read using kseq++ | NA              | NA                | 9351                | 19111              |
+| Sequencial Read using kseq++ | NA              | NA                | 9351                | 19111           |
+| FQFeeder                     | 1               | 1                 | NA                | 20715              |
+| FQFeeder                     | 1               | 2                 | NA                | 20376              |
+| FQFeeder                     | 1               | 3                 | NA                | 20559              |
+| FQFeeder                     | 1               | 4                 | NA                | 20543              |
+| FQFeeder                     | 1               | 5                 | NA                | 20453              |
+| FQFeeder                     | 1               | 6                 | NA                | 20674              |
 
 ### dataset_C.fq.gz
 Size on disk = 544.9MB
@@ -50,6 +62,13 @@ Number of records = 9186045
 | Method                       | #Reader Threads | #Consumer Threads | Time to read (ms) | Total Time (ms) |
 |------------------------------|-----------------|-------------------|-------------------|-----------------|
 | Sequencial Read using kseq++ | NA              | NA                | 6499                | 11992              |
+| FQFeeder                     | 1               | 1                 | NA                | 6439              |
+| FQFeeder                     | 1               | 2                 | NA                | 6144              |
+| FQFeeder                     | 1               | 3                 | NA                | 6138              |
+| FQFeeder                     | 1               | 4                 | NA                | 6111              |
+| FQFeeder                     | 1               | 5                 | NA                | 6120              |
+| FQFeeder                     | 1               | 6                 | NA                | 6137              |
+
 
 ## Salmonella.fa.gz
 Size on disk = 1.5MB
@@ -65,6 +84,12 @@ Number of records = 1
 | Method                       | #Reader Threads | #Consumer Threads | Time to read (ms) | Total Time (ms) |
 |------------------------------|-----------------|-------------------|-------------------|-----------------|
 | Sequencial Read using kseq++ | NA              | NA                | 6                 | 50              |
+| FQFeeder                     | 1               | 1                 | NA                | 61              |
+| FQFeeder                     | 1               | 2                 | NA                | 62              |
+| FQFeeder                     | 1               | 3                 | NA                | 63              |
+| FQFeeder                     | 1               | 4                 | NA                | 63              |
+| FQFeeder                     | 1               | 5                 | NA                | 60              |
+| FQFeeder                     | 1               | 6                 | NA                | 60              |
 
 
 ## Ecoli.fq.gz
@@ -81,6 +106,12 @@ Number of records = 1495900
 | Method                       | #Reader Threads | #Consumer Threads | Time to read (ms) | Total Time (ms) |
 |------------------------------|-----------------|-------------------|-------------------|-----------------|
 | Sequencial Read using kseq++ | NA              | NA                | 1147                | 1991              |
+| FQFeeder                     | 1               | 1                 | NA                | 1000              |
+| FQFeeder                     | 1               | 2                 | NA                | 1004              |
+| FQFeeder                     | 1               | 3                 | NA                | 1016              |
+| FQFeeder                     | 1               | 4                 | NA                | 998              |
+| FQFeeder                     | 1               | 5                 | NA                | 1002              |
+| FQFeeder                     | 1               | 6                 | NA                | 1002              |
 ## Nematode
 Size on disk = 686.9MB
 Number of records = 11535642
@@ -95,6 +126,12 @@ Number of records = 11535642
 | Method                       | #Reader Threads | #Consumer Threads | Time to read (ms) | Total Time (ms) |
 |------------------------------|-----------------|-------------------|-------------------|-----------------|
 | Sequencial Read using kseq++ | NA              | NA                | 9443                | 19311              |
+| FQFeeder                     | 1               | 1                 | NA                | 10821              |
+| FQFeeder                     | 1               | 2                 | NA                | 8533              |
+| FQFeeder                     | 1               | 3                 | NA                | 8446              |
+| FQFeeder                     | 1               | 4                 | NA                | 8319              |
+| FQFeeder                     | 1               | 5                 | NA                | 8331              |
+| FQFeeder                     | 1               | 6                 | NA                | 8371              |
 
 # Commands to compile
 
