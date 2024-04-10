@@ -1,63 +1,3 @@
-/* zran.c -- example of deflate stream indexing and random access
- * Copyright (C) 2005, 2012, 2018, 2023, 2024 Mark Adler
- * For conditions of distribution and use, see copyright notice in zlib.h
- * Version 1.5  4 Feb 2024  Mark Adler */
-
-/* Version History:
- 1.0  29 May 2005  First version
- 1.1  29 Sep 2012  Fix memory reallocation error
- 1.2  14 Oct 2018  Handle gzip streams with multiple members
-                   Add a header file to facilitate usage in applications
- 1.3  18 Feb 2023  Permit raw deflate streams as well as zlib and gzip
-                   Permit crossing gzip member boundaries when extracting
-                   Support a size_t size when extracting (was an int)
-                   Do a binary search over the index for an access point
-                   Expose the access point type to enable save and load
- 1.4  13 Apr 2023  Add a NOPRIME define to not use inflatePrime()
- 1.5   4 Feb 2024  Set returned index to NULL on an index build error
-                   Stop decoding once request is satisfied
-                   Provide a reusable inflate engine in the index
-                   Allocate the dictionaries to reduce memory usage
- */
-
-// Illustrate the use of Z_BLOCK, inflatePrime(), and inflateSetDictionary()
-// for random access of a compressed file. A file containing a raw deflate
-// stream is provided on the command line. The compressed stream is decoded in
-// its entirety, and an index built with access points about every SPAN bytes
-// in the uncompressed output. The compressed file is left open, and can then
-// be read randomly, having to decompress on the average SPAN/2 uncompressed
-// bytes before getting to the desired block of data.
-//
-// An access point can be created at the start of any deflate block, by saving
-// the starting file offset and bit of that block, and the 32K bytes of
-// uncompressed data that precede that block. Also the uncompressed offset of
-// that block is saved to provide a reference for locating a desired starting
-// point in the uncompressed stream. deflate_index_build() decompresses the
-// input raw deflate stream a block at a time, and at the end of each block
-// decides if enough uncompressed data has gone by to justify the creation of a
-// new access point. If so, that point is saved in a data structure that grows
-// as needed to accommodate the points.
-//
-// To use the index, an offset in the uncompressed data is provided, for which
-// the latest access point at or preceding that offset is located in the index.
-// The input file is positioned to the specified location in the index, and if
-// necessary the first few bits of the compressed data is read from the file.
-// inflate is initialized with those bits and the 32K of uncompressed data, and
-// decompression then proceeds until the desired offset in the file is reached.
-// Then decompression continues to read the requested uncompressed data from
-// the file.
-//
-// There is some fair bit of overhead to starting inflation for the random
-// access, mainly copying the 32K byte dictionary. If small pieces of the file
-// are being accessed, it would make sense to implement a cache to hold some
-// lookahead to avoid many calls to deflate_index_extract() for small lengths.
-//
-// Another way to build an index would be to use inflateCopy(). That would not
-// be constrained to have access points at block boundaries, but would require
-// more memory per access point, and could not be saved to a file due to the
-// use of pointers in the state. The approach here allows for storage of the
-// index in a file.
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,7 +26,6 @@ struct deflate_index {
 #define WINSIZE 32768U      // sliding window size
 #define CHUNK 16384         // file input buffer size
 
-// Function to print an access point in one line
 void print_point(point_t *point) {
     // Print an entire access point in one line
     std::cout << "out: " << point->out << ", in: " << point->in << ", bits: " << point->bits << ", dict: " << point->dict << ", window: ";
@@ -96,7 +35,6 @@ void print_point(point_t *point) {
     std::cout << std::endl;
 }
 
-// Function to print the index
 void print_index(struct deflate_index *index) {
     std::cout << "================ index: ================" << std::endl;
 
@@ -113,7 +51,7 @@ void print_index(struct deflate_index *index) {
     std::cout << "strm.zfree: " << index->strm.zfree << std::endl;
     std::cout << "strm.opaque: " << index->strm.opaque << std::endl;
 
-    // Print the access points
+    // Print access points
     for (int i = 0; i < index->have; i++) {
         print_point(index->list + i);
     }
@@ -121,7 +59,6 @@ void print_index(struct deflate_index *index) {
 
 }
 
-// See comments in zran.h.
 void deflate_index_free(struct deflate_index *index) {
     if (index != NULL) {
         size_t i = index->have;
@@ -141,7 +78,7 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
         fwrite(&index->have, sizeof(index->have), 1, out) != 1)
         return Z_ERRNO;
 
-    // Write the access points.
+    // Write access points
     for (int i = 0; i < index->have; i++) {
         point_t *point = index->list + i;
         if (fwrite(&point->out, sizeof(point->out), 1, out) != 1 ||
@@ -169,7 +106,7 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
         return Z_ERRNO;
     }
 
-    // Read the access points.
+    // Read access points
     index->list = (point_t *) malloc(sizeof(point_t) * index->have);
     if (index->list == NULL) {
         deflate_index_free(index);
@@ -195,13 +132,13 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
         }
     }
 
-    // Initialize the inflation state.
+    // Initialize inflation state
     index->strm.zalloc = Z_NULL;
     index->strm.zfree = Z_NULL;
     index->strm.opaque = Z_NULL;
     inflateInit2(&index->strm, index->mode);
 
-    // Return the index.
+    // Return index
     *built = index;
     return index->have;
 }
@@ -255,7 +192,6 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
 #define ZLIB 15
 #define GZIP 31
 
-// See comments in zran.h.
 int deflate_index_build(FILE *in, off_t span, struct deflate_index **built) {
     // If this returns with an error, any attempt to use the index will cleanly
     // return an error.
@@ -377,7 +313,6 @@ int deflate_index_build(FILE *in, off_t span, struct deflate_index **built) {
 
 #define INFLATEPRIME inflatePrime
 
-// See comments in zran.h.
 ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
                                 off_t offset, unsigned char *buf, size_t len) {
     // Do a quick sanity check on the index.
