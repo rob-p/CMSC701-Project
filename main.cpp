@@ -15,25 +15,16 @@ int main(int argc, char **argv) {
         build_index(argv[2], SPAN);
     } else {
         // use mode
-        off_t offset = -1;
-        off_t read_len = -1;
+        off_t record_idx = -1;
         if (argc > 2) {
             char *end;
-            offset = strtoll(argv[4], &end, 0);
+            record_idx = strtoll(argv[4], &end, 0);
             if (*end) {
-                fprintf(stderr, "zran: invalid offset\n");
-                return 1;
-            }
-
-            char *end1;
-            read_len = strtoll(argv[5], &end1, 0);
-            if (*end1) {
-                fprintf(stderr, "zran: invalid read_len\n");
+                fprintf(stderr, "zran: invalid record_idx\n");
                 return 1;
             }
         }
-        fprintf(stderr, "zran: extracting %d bytes at offset %ld\n", read_len, offset);
-        read_index(argv[2], argv[3], offset, read_len);
+        read_index(argv[2], argv[3], record_idx);
     }
     return 0;
 }

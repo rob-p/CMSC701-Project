@@ -35,6 +35,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <kseq++/seqio.hpp>
+#include <limits>
 using namespace std;
 
 #define WINSIZE 32768U      // sliding window size
@@ -551,6 +552,9 @@ void build_index(const char * gzFile, off_t span) {
     while(iss >> record) {
         index->record_boundaries.push_back(record.bytes_offset);
     }
+    // Adding 1000 as a buffer because kseqc++ removes some characters while parsing the records.
+    unsigned long long int end_offset = 1000+(record.bytes_offset + record.name.size() + record.comment.size() + record.seq.size() + record.qual.size());
+    index->record_boundaries.push_back(end_offset);
     fprintf(stderr, "Got records boundaries from FASTQ file\n");
 
     // Save index to file
@@ -595,13 +599,13 @@ void build_index(const char * gzFile, off_t span) {
 }
 
 
-void read_index(const char * gzFile, const char * indexFile, off_t offset, off_t read_len) {
+void read_index(const char * gzFile, const char * indexFile, off_t record_idx) {
     FILE *in = fopen(gzFile, "rb");
     if (in == NULL) {
         throw runtime_error("Could not open the given gzFile for reading");
         return;
     }
-    fprintf(stderr, "zran: extracting %d bytes at offset %ld\n", read_len, offset);
+    fprintf(stderr, "Extracting %d record\n", record_idx);
     struct deflate_index *index = NULL;
     int len;
 
@@ -639,6 +643,12 @@ void read_index(const char * gzFile, const char * indexFile, off_t offset, off_t
     }
 
     fprintf(stderr, "zran: read index with %d access points!\n", len);
+    if (record_idx >= (index->record_boundaries.size() - 1)) {
+        throw runtime_error("FASTQ files does not have these many records");
+    }
+    off_t offset = index->record_boundaries[record_idx];
+    off_t read_len = index->record_boundaries[record_idx + 1] - index->record_boundaries[record_idx];
+
     unsigned char buf[read_len];
     ptrdiff_t got = deflate_index_extract(in, index, offset, buf, read_len);
 
