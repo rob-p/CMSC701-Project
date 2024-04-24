@@ -33,6 +33,9 @@
 #include <limits.h>
 #include <zlib.h>
 #include <iostream>
+#include <stdexcept>
+#include <kseq++/seqio.hpp>
+using namespace std;
 
 #define WINSIZE 32768U      // sliding window size
 #define CHUNK 16384         // file input buffer size
@@ -60,6 +63,7 @@ struct deflate_index {
     off_t length;       // total length of uncompressed data
     point_t *list;      // allocated list of access points
     z_stream strm;      // re-usable inflate engine for extraction
+    vector<unsigned long long int> record_boundaries; // stores bytes offsets of records in FASTQ file
 };
 
 void print_point(point_t *point) {
@@ -125,7 +129,11 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
             fwrite(point->window, 1, point->dict, out) != point->dict)
             return Z_ERRNO;
     }
-
+    // Write record boundaries
+    size_t boundaries_count = index->record_boundaries.size();
+    if (fwrite(&boundaries_count, sizeof(boundaries_count), 1, out) != 1 ||
+        fwrite(index->record_boundaries.data(), sizeof(unsigned long long int), boundaries_count, out) != boundaries_count)
+        return Z_ERRNO;
     return 0;
 }
 
@@ -167,6 +175,18 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
             deflate_index_free(index);
             return Z_ERRNO;
         }
+    }
+
+    // Read record boundaries
+    size_t boundaries_count;
+    if (fread(&boundaries_count, sizeof(boundaries_count), 1, in) != 1) {
+        deflate_index_free(index);
+        return Z_ERRNO;
+    }
+    index->record_boundaries.resize(boundaries_count);
+    if (fread(index->record_boundaries.data(), sizeof(unsigned long long int), boundaries_count, in) != boundaries_count) {
+        deflate_index_free(index);
+        return Z_ERRNO;
     }
 
     // Initialize inflation state
@@ -490,4 +510,144 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
         return ret;
     }
 
+}
+
+
+void build_index(const char * gzFile, off_t span) {
+    FILE *in = fopen(gzFile, "rb");
+    if (in == NULL) {
+        throw runtime_error("Could not open the given gzFile for reading");
+        return;
+    }
+    struct deflate_index *index = NULL;
+    int len = deflate_index_build(in, span, &index);
+
+    if (len < 0) {
+        fclose(in);
+        switch (len) {
+            case Z_MEM_ERROR:
+                throw runtime_error("Ran out of memory while building index");
+                break;
+            case Z_BUF_ERROR:
+                throw runtime_error("Building index ended prematurely");
+                break;
+            case Z_DATA_ERROR:
+                throw runtime_error("Saw compressed data error while building index");
+                break;
+            case Z_ERRNO:
+                throw runtime_error("Saw read error while building index");
+                break;
+            default:
+                throw runtime_error("Saw error while building index");
+        }
+        return;
+    }
+
+    fprintf(stderr, "zran: built index with %d access points!\n", len);
+    print_index(index);
+    fprintf(stderr, "Getting records boundaries from FASTQ file\n");
+    klibpp::KSeq record;
+    klibpp::SeqStreamIn iss(gzFile);
+    while(iss >> record) {
+        index->record_boundaries.push_back(record.bytes_offset);
+    }
+    fprintf(stderr, "Got records boundaries from FASTQ file\n");
+
+    // Save index to file
+    char *filename = (char *) malloc(strlen(gzFile) + 6);
+    if (filename == NULL) {
+        fprintf(stderr, "zran: out of memory\n");
+        deflate_index_free(index);
+        fclose(in);
+        return;
+    }
+    strcpy(filename, gzFile);
+    strcat(filename, ".index");
+
+    fprintf(stderr, "zran: attempting to write index to %s\n", filename);
+
+    // Open the index file for writing.
+    FILE *idx = fopen(filename, "wb");
+    if (idx == NULL) {
+        fprintf(stderr, "zran: could not open %s for writing\n", filename);
+        deflate_index_free(index);
+        fclose(in);
+        return;
+    }
+
+    // Write the index to the file.
+    len = deflate_index_save(idx, index);
+    if (len != 0) {
+        fclose(idx);
+        fprintf(stderr, "zran: write error on %s\n", filename);
+        deflate_index_free(index);
+        fclose(in);
+        return;
+    }
+    fprintf(stderr, "zran: wrote index with %d access points to %s\n", index->have, filename);
+
+    // Clean up and exit
+    fclose(idx);
+    free(filename);
+    deflate_index_free(index);
+    fclose(in);
+    return;
+}
+
+
+void read_index(const char * gzFile, const char * indexFile, off_t offset, off_t read_len) {
+    FILE *in = fopen(gzFile, "rb");
+    if (in == NULL) {
+        throw runtime_error("Could not open the given gzFile for reading");
+        return;
+    }
+    fprintf(stderr, "zran: extracting %d bytes at offset %ld\n", read_len, offset);
+    struct deflate_index *index = NULL;
+    int len;
+
+    fprintf(stderr, "zran: attempting to read index\n");
+
+    FILE *index_file = fopen(indexFile, "rb");
+    if (index_file == NULL) {
+        fprintf(stderr, "zran: could not open index for reading\n");
+        fclose(in);
+        return;
+    }
+
+    len = deflate_index_load(index_file, &index);
+    fclose(index_file);
+
+    if (len < 0) {
+        fclose(in);
+        switch (len) {
+            case Z_MEM_ERROR:
+                throw runtime_error("Ran out of memory while building index");
+                break;
+            case Z_BUF_ERROR:
+                throw runtime_error("Building index ended prematurely");
+                break;
+            case Z_DATA_ERROR:
+                throw runtime_error("Saw compressed data error while building index");
+                break;
+            case Z_ERRNO:
+                throw runtime_error("Saw read error while building index");
+                break;
+            default:
+                throw runtime_error("Saw error while building index");
+        }
+        return;
+    }
+
+    fprintf(stderr, "zran: read index with %d access points!\n", len);
+    unsigned char buf[read_len];
+    ptrdiff_t got = deflate_index_extract(in, index, offset, buf, read_len);
+
+    if (got < 0)
+        fprintf(stderr, "zran: extraction failed: %s error\n",
+                got == Z_MEM_ERROR ? "out of memory" : "input corrupted");
+    else {
+        fwrite(buf, 1, got, stdout);
+    }
+    deflate_index_free(index);
+    fclose(in);
 }
