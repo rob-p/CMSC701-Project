@@ -599,7 +599,7 @@ void build_index(const char * gzFile, off_t span) {
 }
 
 
-void read_index(const char * gzFile, const char * indexFile, off_t record_idx) {
+void read_index(const char * gzFile, const char * indexFile, off_t record_idx, off_t num_records) {
     FILE *in = fopen(gzFile, "rb");
     if (in == NULL) {
         throw runtime_error("Could not open the given gzFile for reading");
@@ -643,11 +643,11 @@ void read_index(const char * gzFile, const char * indexFile, off_t record_idx) {
     }
 
     fprintf(stderr, "zran: read index with %d access points!\n", len);
-    if (record_idx >= (index->record_boundaries.size() - 1)) {
+    if (record_idx >= (index->record_boundaries.size() - num_records)) {
         throw runtime_error("FASTQ files does not have these many records");
     }
     off_t offset = index->record_boundaries[record_idx];
-    off_t read_len = index->record_boundaries[record_idx + 1] - index->record_boundaries[record_idx];
+    off_t read_len = index->record_boundaries[record_idx + num_records] - index->record_boundaries[record_idx];
 
     unsigned char buf[read_len];
     ptrdiff_t got = deflate_index_extract(in, index, offset, buf, read_len);
