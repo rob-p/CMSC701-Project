@@ -36,15 +36,15 @@ wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR2859251
 make main
 ```
 
-2. Generate index file
+2. Generate index file using distance between access points as 524288 
 ```
-./main.out build data/nematode.fq.gzip
+./main.out build data/nematode.fq.gzip 524288
 ```
 
-3. Use generated index file to extract `LEN` (16384) bytes from an offset:
+3. Get 10000 records starting from index 0
 
 ```
-./main.out use data/nematode.fq.gzip data/nematode.fq.gzip.index 872 120
+./main.out use data/nematode.fq.gzip data/nematode.fq.gzip.index 0 10000
 ```
 
 ## About zran.c
