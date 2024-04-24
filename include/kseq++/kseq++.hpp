@@ -15,6 +15,9 @@
  *  See LICENSE file for more information.
  */
 
+// This file is adapted from Ali Ghaffaari's KSeq++ and is adapted for our use case of
+// parallel decompression of gzipped FASTQ files
+
 #ifndef  KSEQPP_KSEQPP_HPP__
 #define  KSEQPP_KSEQPP_HPP__
 
@@ -49,6 +52,7 @@ namespace klibpp {
     std::string comment;
     std::string seq;
     std::string qual;
+    unsigned long long int bytes_offset;  //bytes offset from start of the file where this record starts
     inline void clear( ) {
       name.clear();
       comment.clear();
@@ -460,6 +464,7 @@ namespace klibpp {
         bool is_ready;                       /**< @brief next record ready flag */
         bool last;                           /**< @brief last read was successful */
         unsigned long int counter;           /**< @brief number of parsed records so far */
+        unsigned long long int bytes_so_far;
         TFile f;                             /**< @brief file handler */
         TFunc func;                          /**< @brief read function */
         close_type close;                    /**< @brief close function */
@@ -479,6 +484,7 @@ namespace klibpp {
           this->is_ready = false;
           this->last = false;
           this->counter = 0;
+          this->bytes_so_far= -1 * DEFAULT_BUFSIZE;
         }
 
         KStream( TFile f_,
@@ -519,6 +525,7 @@ namespace klibpp {
           this->f = std::move( other.f );
           this->func = std::move( other.func );
           this->close = other.close;
+          this->bytes_so_far= -1 * DEFAULT_BUFSIZE;
         }
 
         KStream& operator=( KStream&& other ) noexcept
@@ -587,6 +594,7 @@ namespace klibpp {
             if ( this->fail() ) return *this;
             this->is_ready = true;
           }  // else: the first header char has been read in the previous call
+          rec.bytes_offset = this->bytes_so_far + this->begin - 1;
           rec.clear();  // reset all members
           if ( !this->getuntil( KStream::SEP_SPACE, rec.name, &c ) ) return *this;
           if ( c != '\n' ) {  // read FASTA/Q comment
@@ -655,6 +663,7 @@ namespace klibpp {
           // fetch
           if ( this->begin >= this->end ) {
             this->begin = 0;
+            this->bytes_so_far += this->bufsize;
             this->end = this->func( this->f, this->buf, this->bufsize );
             if ( this->end <= 0 ) {  // err if end == -1 and eof if 0
               this->is_eof = true;

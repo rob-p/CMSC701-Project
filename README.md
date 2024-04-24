@@ -33,18 +33,18 @@ wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR2859251
 
 1. Build everything
 ```
-make
+make main
 ```
 
 2. Generate index file
 ```
-./zran.out test-data/salmonella.fa.gz
+./main.out build data/nematode.fq.gzip
 ```
 
 3. Use generated index file to extract `LEN` (16384) bytes from an offset:
 
 ```
-./zran.out test-data/salmonella.fa.gz 400 ./test-data/salmonella.fa.gz.index
+./main.out use data/nematode.fq.gzip data/nematode.fq.gzip.index 872 120
 ```
 
 ## About zran.c
