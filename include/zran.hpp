@@ -36,6 +36,7 @@
 #include <stdexcept>
 #include <kseq++/seqio.hpp>
 #include <limits>
+#include <utility>
 using namespace std;
 
 #define WINSIZE 32768U      // sliding window size
@@ -64,7 +65,20 @@ struct deflate_index {
     off_t length;       // total length of uncompressed data
     point_t *list;      // allocated list of access points
     z_stream strm;      // re-usable inflate engine for extraction
-    vector<unsigned long long int> record_boundaries; // stores bytes offsets of records in FASTQ file
+    vector<uint64_t>* record_boundaries; // stores bytes offsets of records in FASTQ file
+    off_t num_records;  // number of records in FASTQ file
+
+    // Copy constructor - Shallow copy
+    deflate_index(deflate_index &other) {
+        have = other.have;
+        mode = other.mode;
+        length = other.length;
+        list = other.list;
+        inflateCopy(&strm, &other.strm);
+        record_boundaries = other.record_boundaries;
+        num_records = other.num_records;
+    }
+
 };
 
 void print_point(point_t *point) {
@@ -102,6 +116,7 @@ void print_index(struct deflate_index *index) {
 }
 
 void deflate_index_free(struct deflate_index *index) {
+    fprintf(stderr, "zran: freeing index\n");
     if (index != NULL) {
         size_t i = index->have;
         while (i)
@@ -117,7 +132,8 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
     // Write metadata
     if (fwrite(&index->mode, sizeof(index->mode), 1, out) != 1 ||
         fwrite(&index->length, sizeof(index->length), 1, out) != 1 ||
-        fwrite(&index->have, sizeof(index->have), 1, out) != 1)
+        fwrite(&index->have, sizeof(index->have), 1, out) != 1 ||
+        fwrite(&index->num_records, sizeof(index->num_records), 1, out) != 1)
         return Z_ERRNO;
 
     // Write access points
@@ -131,9 +147,9 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
             return Z_ERRNO;
     }
     // Write record boundaries
-    size_t boundaries_count = index->record_boundaries.size();
+    size_t boundaries_count = index->record_boundaries->size();
     if (fwrite(&boundaries_count, sizeof(boundaries_count), 1, out) != 1 ||
-        fwrite(index->record_boundaries.data(), sizeof(unsigned long long int), boundaries_count, out) != boundaries_count)
+        fwrite(index->record_boundaries->data(), sizeof(uint64_t), boundaries_count, out) != boundaries_count)
         return Z_ERRNO;
     return 0;
 }
@@ -147,8 +163,9 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
     // Read metadata
     if (fread(&index->mode, sizeof(index->mode), 1, in) != 1 ||
         fread(&index->length, sizeof(index->length), 1, in) != 1 ||
-        fread(&index->have, sizeof(index->have), 1, in) != 1) {
-        free(index);
+        fread(&index->have, sizeof(index->have), 1, in) != 1 ||
+        fread(&index->num_records, sizeof(index->num_records), 1, in) != 1) {
+                free(index);
         return Z_ERRNO;
     }
 
@@ -184,8 +201,9 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
         deflate_index_free(index);
         return Z_ERRNO;
     }
-    index->record_boundaries.resize(boundaries_count);
-    if (fread(index->record_boundaries.data(), sizeof(unsigned long long int), boundaries_count, in) != boundaries_count) {
+    index->record_boundaries = new vector<uint64_t>();
+    index->record_boundaries->resize(boundaries_count);
+    if (fread(index->record_boundaries->data(), sizeof(uint64_t), boundaries_count, in) != boundaries_count) {
         deflate_index_free(index);
         return Z_ERRNO;
     }
@@ -549,12 +567,17 @@ void build_index(const char * gzFile, off_t span) {
     fprintf(stderr, "Getting records boundaries from FASTQ file\n");
     klibpp::KSeq record;
     klibpp::SeqStreamIn iss(gzFile);
+    uint64_t RECORD_SPAN = 10000;
+    index->record_boundaries = new vector<uint64_t>();
     while(iss >> record) {
-        index->record_boundaries.push_back(record.bytes_offset);
+      //if (count++ % RECORD_SPAN == 0) {
+      index->record_boundaries->push_back(record.bytes_offset);
+      //}
     }
+    index->num_records = index->record_boundaries->size();
     // Adding 1000 as a buffer because kseqc++ removes some characters while parsing the records.
-    unsigned long long int end_offset = 1000+(record.bytes_offset + record.name.size() + record.comment.size() + record.seq.size() + record.qual.size());
-    index->record_boundaries.push_back(end_offset);
+    uint64_t end_offset = 1000+(record.bytes_offset + record.name.size() + record.comment.size() + record.seq.size() + record.qual.size());
+    index->record_boundaries->push_back(end_offset);
     fprintf(stderr, "Got records boundaries from FASTQ file\n");
 
     // Save index to file
@@ -598,31 +621,63 @@ void build_index(const char * gzFile, off_t span) {
     return;
 }
 
+off_t get_read_len(struct deflate_index *index, off_t record_idx, off_t num_records) {
+    if (record_idx >= (index->record_boundaries->size() - num_records)) {
+      num_records = index->record_boundaries->size() - record_idx - 1;
+    }
+    off_t read_len = (*index->record_boundaries)[record_idx + num_records] - (*index->record_boundaries)[record_idx];
+    return read_len;
+}
 
-void read_index(const char * gzFile, const char * indexFile, off_t record_idx, off_t num_records) {
+// TODO: This should be named something else like read_records
+std::pair<unsigned char*, int> read_index(const char * gzFile, struct deflate_index *index, off_t record_idx, off_t num_records, unsigned char* buf = NULL) {
     FILE *in = fopen(gzFile, "rb");
     if (in == NULL) {
         throw runtime_error("Could not open the given gzFile for reading");
-        return;
+        return std::make_pair<unsigned char*, int>(NULL, -1);
     }
-    fprintf(stderr, "Extracting %d record\n", record_idx);
+    //fprintf(stderr, "Extracting %d record\n", record_idx);
+
+
+    if (record_idx >= (index->record_boundaries->size() - num_records)) {
+        num_records = index->record_boundaries->size() - record_idx - 1;
+    }
+    off_t offset = (*index->record_boundaries)[record_idx];
+    off_t read_len = (*index->record_boundaries)[record_idx + num_records] - (*index->record_boundaries)[record_idx];
+
+    // TODO: Use shared pointer
+    if (buf == NULL) {
+        buf = (unsigned char*) malloc(read_len);
+    }
+    ptrdiff_t got = deflate_index_extract(in, index, offset, buf, read_len);
+
+    //if (got < 0)
+    //    fprintf(stderr, "zran: extraction failed: %s error\n",
+    //            got == Z_MEM_ERROR ? "out of memory" : "input corrupted");
+    //else {
+    //    fwrite(buf, 1, got, stdout);
+    //}
+    fclose(in);
+
+    return std::make_pair(buf, got);
+}
+
+std::pair<unsigned char*, int> read_index(const char * gzFile, const char * indexFile, off_t record_idx, off_t num_records) {
     struct deflate_index *index = NULL;
     int len;
 
-    fprintf(stderr, "zran: attempting to read index\n");
+    //fprintf(stderr, "zran: attempting to read index\n");
 
     FILE *index_file = fopen(indexFile, "rb");
     if (index_file == NULL) {
         fprintf(stderr, "zran: could not open index for reading\n");
-        fclose(in);
-        return;
+        return std::make_pair<unsigned char*, int>(NULL, -1);
     }
 
     len = deflate_index_load(index_file, &index);
     fclose(index_file);
 
     if (len < 0) {
-        fclose(in);
         switch (len) {
             case Z_MEM_ERROR:
                 throw runtime_error("Ran out of memory while building index");
@@ -639,25 +694,8 @@ void read_index(const char * gzFile, const char * indexFile, off_t record_idx, o
             default:
                 throw runtime_error("Saw error while building index");
         }
-        return;
+        return std::make_pair<unsigned char*, int>(NULL, -1);
     }
-
     fprintf(stderr, "zran: read index with %d access points!\n", len);
-    if (record_idx >= (index->record_boundaries.size() - num_records)) {
-        throw runtime_error("FASTQ files does not have these many records");
-    }
-    off_t offset = index->record_boundaries[record_idx];
-    off_t read_len = index->record_boundaries[record_idx + num_records] - index->record_boundaries[record_idx];
-
-    unsigned char buf[read_len];
-    ptrdiff_t got = deflate_index_extract(in, index, offset, buf, read_len);
-
-    if (got < 0)
-        fprintf(stderr, "zran: extraction failed: %s error\n",
-                got == Z_MEM_ERROR ? "out of memory" : "input corrupted");
-    else {
-        fwrite(buf, 1, got, stdout);
-    }
-    deflate_index_free(index);
-    fclose(in);
+    return read_index(gzFile, index, record_idx, num_records);
 }

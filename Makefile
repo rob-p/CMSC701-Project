@@ -7,6 +7,9 @@ main: main.cpp
 offsets: offsets.cpp
 	g++ -std=c++17 -Wall -O3 -o offsets.out offsets.cpp -I ./ -I ./include/ -L ./ -lz
 
+test_parser: test_parser.cpp
+	g++ -std=c++17 -Wall -O3 -o test_parser.out test_parser.cpp -I ./ -I ./include/ -L ./ -lz
+
 all: main offsets
 
 clean:

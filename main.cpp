@@ -1,6 +1,7 @@
 #include <iostream>
 #include <zran.hpp>
 #include "kseq++/seqio.hpp"
+#include "kseqcharstream.hpp"
 using namespace std;
 using namespace klibpp;
 
@@ -40,7 +41,21 @@ int main(int argc, char **argv) {
                 return 1;
             }
         }
-        read_index(argv[2], argv[3], record_idx, num_records);
+        unsigned char* buf;
+        int got;
+        std::tie(buf, got) = read_index(argv[2], argv[3], record_idx, num_records);
+        if (got < 0)
+            fprintf(stderr, "zran: extraction failed: %s error\n",
+                    got == Z_MEM_ERROR ? "out of memory" : "input corrupted");
+        else {
+            fwrite(buf, 1, got, stdout);
+        }
+        KseqCharStreamIn in(reinterpret_cast<const char*>(buf), got);
+
+        klibpp::KSeq rec;
+        while (in >> rec) {
+          cout << rec.seq << endl;
+        }
     }
     return 0;
 }
