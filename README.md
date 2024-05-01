@@ -1,6 +1,45 @@
 # CMSC701-Project
 Class project for CMSC701
 
+## Running this project
+
+
+Generate index file using distance between access points as 524288 bytes 
+```
+cd $PRJECT_ROOT
+make main
+./main.out build /path/to/compressed-fastq-file 524288
+```
+
+Get 10000 records starting from index 0
+
+```
+./main.out use /path/to/compressed-fastq-file /path/to/index-file 0 10000
+```
+
+Running our benchmark
+```
+cd $PRJECT_ROOT
+make test_parser
+./test_parser.out <fastq_file> <index_file> <num_consumer_threads> <num_producer_threads>
+```
+
+## Commands to compile various benchmarks
+
+1. FQFeeder
+```unix
+cd $PRJECT_ROOT
+make fqfeeder
+./fqfeeder.out /path/to/compressed-fastq-file <num_consumer_threads> <num_parsing_threads>
+```
+
+2. ../Scripts/CountBases.cpp
+```unix
+cd $PROJECT_ROOT
+make baseline
+./countbases.out /path/to/compressed-fastq-file
+```
+
 ## Installing zlib
 ```
 git clone git@github.com:madler/zlib.git
@@ -27,45 +66,6 @@ wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR2859629
 
 # 595 MB compressed
 wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR28592514 -O nematode.fq.gzip
-```
-
-## Running this project
-
-
-Generate index file using distance between access points as 524288 bytes 
-```
-cd $PRJECT_ROOT
-make main
-./main.out build /path/to/compressed-fastq-file 524288
-```
-
-Get 10000 records starting from index 0
-
-```
-./main.out use /path/to/compressed-fastq-file /path/to/index-file 0 10000
-```
-
-Running our benchmark
-```
-cd $PRJECT_ROOT
-make test_parser
-./test_parser.out <fastq_file> <index_file> <num_consumer_threads> <num_producer_threads>
-```
-
-# Commands to compile various benchmarks
-
-1. FQFeeder
-```unix
-cd $PRJECT_ROOT
-make fqfeeder
-./fqfeeder.out /path/to/compressed-fastq-file <num_consumer_threads> <num_parsing_threads>
-```
-
-2. ../Scripts/CountBases.cpp
-```unix
-cd $PROJECT_ROOT
-make baseline
-./countbases.out /path/to/compressed-fastq-file
 ```
 
 ## About zran.c
@@ -147,3 +147,12 @@ reading or seeking on the input file.
 
 - `deflate_index_save`: saves index to file
 - `deflate_index_load`: loads index from file
+
+## About kseq++
+
+(From https://github.com/cartoonist/kseqpp)
+
+kseq++ is a C++11 re-implementation of [kseq.h](https://github.com/attractivechaos/klib/blob/master/kseq.h). We have
+extended its functionality to also compute byte offsets from starting of compressed fastq file, for each record, which
+is stored in struct KSeq. Additionaly, we have extended its functionality to be able to parse fastq records from a native
+character stream. This allows it to be integrated when we read raw data from a random offset in compressed fastq file. 
