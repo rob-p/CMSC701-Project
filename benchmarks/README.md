@@ -132,17 +132,3 @@ Number of records = 11535642
 | FQFeeder                     | 1               | 4                 | NA                | 8319              |
 | FQFeeder                     | 1               | 5                 | NA                | 8331              |
 | FQFeeder                     | 1               | 6                 | NA                | 8371              |
-
-# Commands to compile
-
-1. FQFeeder  
-```unix
-cd $PRJECT_ROOT/benchmarks
-g++ -std=c++17 -Wall -O3 -o fq_feeder BenchmarkFQFeeder.cpp ./FQFeeder/src/FastxParser.cpp -I ./FQFeeder/include -L ./ -lz
-```
-
-2. ../Scripts/CountBases.cpp
-```unix
-cd $PROJECT_ROOT
-g++ -std=c++17 -Wall -O3 -o countbases scripts/CountBases.cpp -I ./ -I ./include/ -L ./ -lz
-```

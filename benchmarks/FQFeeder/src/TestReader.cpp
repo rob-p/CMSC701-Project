@@ -2,28 +2,34 @@
 #include <iostream>
 #include <thread>
 #include <vector>
-#include <chrono>
-using namespace std;
 
 struct Bases {
   uint32_t A, C, G, T;
 };
 
 int main(int argc, char* argv[]) {
-    auto start = std::chrono::high_resolution_clock::now();
-
+   if (argc == 1) {
+       std::cerr << "usage: test_parser fa1 fb1 ... fa2 fb2 ...";
+       return 1;
+   } 
+   int numFiles = argc - 1;
+   if (numFiles % 2 != 0) {
+       std::cerr << "you must provide an even number of files!\n";
+       return 1;
+   }
+   
+   size_t numPairs = numFiles / 2;
    std::vector<std::string> files;
-   files.push_back(argv[1]);
+   std::vector<std::string> files2;
+   for (size_t i = 1; i <= numPairs; ++i) {
+       files.push_back(argv[i]);
+       files2.push_back(argv[i + numPairs]);
+   }
 
-   cout << files[0] << endl;
-
-  size_t nt = stoi(argv[2]);  // number of consumer threads
-  size_t np = stoi(argv[3]);  // number of producer threads
-  fastx_parser::FastxParser<fastx_parser::ReadSeq> parser(files, nt, np);
-  cout << "Starting parsing" << endl;
+  size_t nt = 4;
+  size_t np = 2;
+  fastx_parser::FastxParser<fastx_parser::ReadPair> parser(files, files2, nt, np);
   parser.start();
-  cout << "Ending parsing" << endl;
-  auto end_read = std::chrono::high_resolution_clock::now();
 
   std::vector<std::thread> readers;
   std::vector<Bases> counters(nt, {0, 0, 0, 0});
@@ -38,14 +44,14 @@ int main(int argc, char* argv[]) {
           auto chunk_frag_offset = rg.chunk_frag_offset();
           std::cerr << "chunk_offset_info: [file_idx: " << chunk_frag_offset.file_idx 
                     << ", frag_idx:" << chunk_frag_offset.frag_idx << ", chunk_size: " << rg.size() <<"]\n";
-          for (auto& seq : rg) {
+          for (auto& seqPair : rg) {
             ++lctr;
 
-//            auto& seq = seqPair.first;
-//            auto& seq2 = seqPair.second;
+            auto& seq = seqPair.first;
+            auto& seq2 = seqPair.second;
 
             size_t j = 0;
-            for (size_t j = 0; j < seq.seq.length(); ++j) {
+            //for (size_t j = 0; j < seq.seq.length(); ++j) {
               char c = seq.seq[j];
               switch (c) {
               case 'A':
@@ -63,25 +69,25 @@ int main(int argc, char* argv[]) {
               default:
                 break;
               }
-            }
+            //}
             //for (size_t j = 0; j < seq2.seq.length(); ++j) {
-//              c = seq2.seq[j];
-//              switch (c) {
-//              case 'A':
-//                counters[i].A++;
-//                break;
-//              case 'C':
-//                counters[i].C++;
-//                break;
-//              case 'G':
-//                counters[i].G++;
-//                break;
-//              case 'T':
-//                counters[i].T++;
-//                break;
-//              default:
-//                break;
-//              }
+              c = seq2.seq[j];
+              switch (c) {
+              case 'A':
+                counters[i].A++;
+                break;
+              case 'C':
+                counters[i].C++;
+                break;
+              case 'G':
+                counters[i].G++;
+                break;
+              case 'T':
+                counters[i].T++;
+                break;
+              default:
+                break;
+              }
            // }
           }
           ctr += (lctr - pctr);
@@ -118,14 +124,5 @@ int main(int argc, char* argv[]) {
   std::cerr << "#C = " << b.C << '\n';
   std::cerr << "#G = " << b.G << '\n';
   std::cerr << "#T = " << b.T << '\n';
-    auto end = std::chrono::high_resolution_clock::now();
-
-    // Calculate the duration in milliseconds
-    auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(end_read - start);
-    auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-    // Output the duration
-    std::cout << "Time taken (to read): " << duration1.count() << " milliseconds" << std::endl;
-    std::cout << "Time taken (total): " << duration2.count() << " milliseconds" << std::endl;
   return 0;
 }

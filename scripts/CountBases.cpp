@@ -14,8 +14,7 @@ int main(int argc, char* argv[]) {
         genomes.push_back(record.seq);
     }
     auto end_read = std::chrono::high_resolution_clock::now();
-    cout << ids.size() << endl;
-    cout << genomes.size() << endl;
+    cout << "Number of records: " << ids.size() << endl;
     long long int countA = 0;
     long long int countC = 0;
     long long int countG = 0;
@@ -46,7 +45,7 @@ int main(int argc, char* argv[]) {
 
     // Output the duration
     std::cout << "Time taken (to read): " << duration1.count() << " milliseconds" << std::endl;
-    std::cout << "Time taken (totak): " << duration2.count() << " milliseconds" << std::endl;
+    std::cout << "Time taken (total): " << duration2.count() << " milliseconds" << std::endl;
 
     return 0;
 }
