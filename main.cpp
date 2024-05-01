@@ -1,5 +1,6 @@
 #include <iostream>
 #include <zran.hpp>
+#include <chrono>
 #include "kseq++/seqio.hpp"
 #include "kseqcharstream.hpp"
 using namespace std;
@@ -13,6 +14,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(argv[1], "build") == 0) {
         // build mode
+        auto start = std::chrono::high_resolution_clock::now();
         off_t span = 1048576L;
         char *end2;
         span = strtoll(argv[3], &end2, 0);
@@ -21,6 +23,13 @@ int main(int argc, char **argv) {
             return 1;
         }
         build_index(argv[2], span);
+        auto end = std::chrono::high_resolution_clock::now();
+
+        // Calculate the duration in milliseconds
+        auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+        // Output the duration
+        std::cout << "Time taken to build index (total): " << duration2.count() << " milliseconds" << std::endl;
 
     } else {
         // use mode
