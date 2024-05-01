@@ -31,20 +31,41 @@ wget https://www.be-md.ncbi.nlm.nih.gov/Traces/sra-reads-be/fastq?acc=SRR2859251
 
 ## Running this project
 
-1. Build everything
+
+Generate index file using distance between access points as 524288 bytes 
 ```
+cd $PRJECT_ROOT
 make main
+./main.out build /path/to/compressed-fastq-file 524288
 ```
 
-2. Generate index file using distance between access points as 524288 
-```
-./main.out build data/nematode.fq.gzip 524288
-```
-
-3. Get 10000 records starting from index 0
+Get 10000 records starting from index 0
 
 ```
-./main.out use data/nematode.fq.gzip data/nematode.fq.gzip.index 0 10000
+./main.out use /path/to/compressed-fastq-file /path/to/index-file 0 10000
+```
+
+Running our benchmark
+```
+cd $PRJECT_ROOT
+make test_parser
+./test_parser.out <fastq_file> <index_file> <num_consumer_threads> <num_producer_threads>
+```
+
+# Commands to compile various benchmarks
+
+1. FQFeeder
+```unix
+cd $PRJECT_ROOT
+make fqfeeder
+./fqfeeder.out /path/to/compressed-fastq-file <num_consumer_threads> <num_parsing_threads>
+```
+
+2. ../Scripts/CountBases.cpp
+```unix
+cd $PROJECT_ROOT
+make baseline
+./countbases.out /path/to/compressed-fastq-file
 ```
 
 ## About zran.c
