@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 #include <memory>
+#include <functional>
 
 class ParrFQParser {
  public:
