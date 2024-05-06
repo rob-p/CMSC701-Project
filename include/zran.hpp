@@ -37,6 +37,8 @@
 #include <kseq++/seqio.hpp>
 #include <limits>
 #include <utility>
+#include <chrono>
+
 using namespace std;
 
 #define WINSIZE 32768U      // sliding window size
@@ -65,7 +67,7 @@ struct deflate_index {
     off_t length;       // total length of uncompressed data
     point_t *list;      // allocated list of access points
     z_stream strm;      // re-usable inflate engine for extraction
-    vector<uint64_t>* record_boundaries; // stores bytes offsets of records in FASTQ file
+    vector <uint64_t> *record_boundaries; // stores bytes offsets of records in FASTQ file
     off_t num_records;  // number of records in FASTQ file
 
     // Copy constructor - Shallow copy
@@ -130,6 +132,7 @@ void deflate_index_free(struct deflate_index *index) {
 // Save index to file.
 int deflate_index_save(FILE *out, struct deflate_index *index) {
     // Write metadata
+    auto start = std::chrono::high_resolution_clock::now();
     if (fwrite(&index->mode, sizeof(index->mode), 1, out) != 1 ||
         fwrite(&index->length, sizeof(index->length), 1, out) != 1 ||
         fwrite(&index->have, sizeof(index->have), 1, out) != 1 ||
@@ -146,16 +149,56 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
             fwrite(point->window, 1, point->dict, out) != point->dict)
             return Z_ERRNO;
     }
+
     // Write record boundaries
     size_t boundaries_count = index->record_boundaries->size();
     if (fwrite(&boundaries_count, sizeof(boundaries_count), 1, out) != 1 ||
         fwrite(index->record_boundaries->data(), sizeof(uint64_t), boundaries_count, out) != boundaries_count)
         return Z_ERRNO;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    cout << "Time to save the index " << duration.count() << " milliseconds" << endl;
+    return 0;
+}
+
+// Save index to gzip file.
+int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
+    // Write metadata
+    auto start = std::chrono::high_resolution_clock::now();
+    if (gzwrite(out, &index->mode, sizeof(index->mode)) != sizeof(index->mode) ||
+        gzwrite(out, &index->have, sizeof(index->have)) != sizeof(index->have) ||
+        gzwrite(out, &index->length, sizeof(index->length)) != sizeof(index->length) ||
+        gzwrite(out, &index->num_records, sizeof(index->num_records)) != sizeof(index->num_records))
+        return Z_ERRNO;
+
+    // Write access points
+    for (int i = 0; i < index->have; i++) {
+        point_t *point = index->list + i;
+        if (gzwrite(out, &point->out, sizeof(point->out)) != sizeof(point->out) ||
+            gzwrite(out, &point->in, sizeof(point->in)) != sizeof(point->in) ||
+            gzwrite(out, &point->bits, sizeof(point->bits)) != sizeof(point->bits) ||
+            gzwrite(out, &point->dict, sizeof(point->dict)) != sizeof(point->dict) ||
+            gzwrite(out, point->window, point->dict) != point->dict)
+            return Z_ERRNO;
+    }
+
+    // Write record boundaries
+    size_t boundaries_count = index->record_boundaries->size();
+    if (gzwrite(out, &boundaries_count, sizeof(boundaries_count)) != sizeof(boundaries_count) ||
+        gzwrite(out, index->record_boundaries->data(), sizeof(uint64_t) * boundaries_count) !=
+        sizeof(uint64_t) * boundaries_count)
+        return Z_ERRNO;
+
+    gzclose(out);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    cout << "Time to save the gzip index " << duration.count() << " milliseconds" << endl;
     return 0;
 }
 
 // Read index from file.
 int deflate_index_load(FILE *in, struct deflate_index **built) {
+    auto start = std::chrono::high_resolution_clock::now();
     struct deflate_index *index = (struct deflate_index *) malloc(sizeof(struct deflate_index));
     if (index == NULL)
         return Z_MEM_ERROR;
@@ -165,7 +208,7 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
         fread(&index->length, sizeof(index->length), 1, in) != 1 ||
         fread(&index->have, sizeof(index->have), 1, in) != 1 ||
         fread(&index->num_records, sizeof(index->num_records), 1, in) != 1) {
-                free(index);
+        free(index);
         return Z_ERRNO;
     }
 
@@ -175,6 +218,7 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
         deflate_index_free(index);
         return Z_MEM_ERROR;
     }
+
     for (int i = 0; i < index->have; i++) {
         point_t *point = index->list + i;
         if (fread(&point->out, sizeof(point->out), 1, in) != 1 ||
@@ -216,6 +260,82 @@ int deflate_index_load(FILE *in, struct deflate_index **built) {
 
     // Return index
     *built = index;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    cout << "Time to load the index " << duration.count() << " milliseconds" << endl;
+    return index->have;
+}
+
+// Read index from gzip file.
+int deflate_index_load_gzip(gzFile in, struct deflate_index **built) {
+    auto start = std::chrono::high_resolution_clock::now();
+
+    struct deflate_index *index = (struct deflate_index *) malloc(sizeof(struct deflate_index));
+    if (index == NULL)
+        return Z_MEM_ERROR;
+
+    // Read metadata
+    if (gzread(in, &index->mode, sizeof(index->mode)) != sizeof(index->mode) ||
+        gzread(in, &index->have, sizeof(index->have)) != sizeof(index->have) ||
+        gzread(in, &index->length, sizeof(index->length)) != sizeof(index->length) ||
+        gzread(in, &index->num_records, sizeof(index->num_records)) != sizeof(index->num_records))
+        return Z_ERRNO;
+
+    // Read access points
+    index->list = (point_t *) malloc(sizeof(point_t) * index->have);
+    if (index->list == NULL) {
+        deflate_index_free(index);
+        return Z_MEM_ERROR;
+    }
+
+    for (int i = 0; i < index->have; i++) {
+        point_t *point = index->list + i;
+
+        if (gzread(in, &point->out, sizeof(point->out)) != sizeof(point->out) ||
+            gzread(in, &point->in, sizeof(point->in)) != sizeof(point->in) ||
+            gzread(in, &point->bits, sizeof(point->bits)) != sizeof(point->bits) ||
+            gzread(in, &point->dict, sizeof(point->dict)) != sizeof(point->dict)) {
+            deflate_index_free(index);
+            return Z_ERRNO;
+        }
+
+        point->window = (unsigned char *) malloc(point->dict);
+        if (point->window == NULL) {
+            deflate_index_free(index);
+            return Z_MEM_ERROR;
+        }
+        if (gzread(in, point->window, point->dict) != point->dict) {
+            deflate_index_free(index);
+            return Z_ERRNO;
+        }
+    }
+    // Read record boundaries
+    size_t boundaries_count;
+    if (gzread(in, &boundaries_count, sizeof(boundaries_count)) != sizeof(boundaries_count)) {
+        deflate_index_free(index);
+        return Z_ERRNO;
+    }
+    index->record_boundaries = new vector<uint64_t>();
+    index->record_boundaries->resize(boundaries_count);
+    if (gzread(in, index->record_boundaries->data(), sizeof(uint64_t) * boundaries_count) !=
+        sizeof(uint64_t) * boundaries_count) {
+        deflate_index_free(index);
+        return Z_ERRNO;
+    }
+
+    gzclose(in);
+
+    // Initialize inflation state
+    index->strm.zalloc = Z_NULL;
+    index->strm.zfree = Z_NULL;
+    index->strm.opaque = Z_NULL;
+    inflateInit2(&index->strm, index->mode);
+
+    // Return index
+    *built = index;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    cout << "Time to load the gzip index " << duration.count() << " milliseconds" << endl;
     return index->have;
 }
 
@@ -532,10 +652,10 @@ ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
 }
 
 
-void build_index(const char * gzFile, off_t span) {
-    FILE *in = fopen(gzFile, "rb");
+void build_index(const char *gzFile1, off_t span) {
+    FILE *in = fopen(gzFile1, "rb");
     if (in == NULL) {
-        throw runtime_error("Could not open the given gzFile for reading");
+        throw runtime_error("Could not open the given gzFile1 for reading");
         return;
     }
     struct deflate_index *index = NULL;
@@ -566,55 +686,64 @@ void build_index(const char * gzFile, off_t span) {
     print_index(index);
     fprintf(stderr, "Getting records boundaries from FASTQ file\n");
     klibpp::KSeq record;
-    klibpp::SeqStreamIn iss(gzFile);
+    klibpp::SeqStreamIn iss(gzFile1);
     uint64_t RECORD_SPAN = 10000;
     index->record_boundaries = new vector<uint64_t>();
-    while(iss >> record) {
-      //if (count++ % RECORD_SPAN == 0) {
-      index->record_boundaries->push_back(record.bytes_offset);
-      //}
+    while (iss >> record) {
+        //if (count++ % RECORD_SPAN == 0) {
+        index->record_boundaries->push_back(record.bytes_offset);
+        //}
     }
     index->num_records = index->record_boundaries->size();
     // Adding 1000 as a buffer because kseqc++ removes some characters while parsing the records.
-    uint64_t end_offset = 1000+(record.bytes_offset + record.name.size() + record.comment.size() + record.seq.size() + record.qual.size());
+    uint64_t end_offset = 1000 + (record.bytes_offset + record.name.size() + record.comment.size() + record.seq.size() +
+                                  record.qual.size());
     index->record_boundaries->push_back(end_offset);
     fprintf(stderr, "Got records boundaries from FASTQ file\n");
 
     // Save index to file
-    char *filename = (char *) malloc(strlen(gzFile) + 6);
+    char *filename = (char *) malloc(strlen(gzFile1) + 6);
+    char *filename_gzip = (char *) malloc(strlen(gzFile1) + 11);
     if (filename == NULL) {
         fprintf(stderr, "zran: out of memory\n");
         deflate_index_free(index);
         fclose(in);
         return;
     }
-    strcpy(filename, gzFile);
+    strcpy(filename, gzFile1);
     strcat(filename, ".index");
 
-    fprintf(stderr, "zran: attempting to write index to %s\n", filename);
+    strcpy(filename_gzip, gzFile1);
+    strcat(filename_gzip, ".index.gzip");
 
-    // Open the index file for writing.
-    FILE *idx = fopen(filename, "wb");
-    if (idx == NULL) {
-        fprintf(stderr, "zran: could not open %s for writing\n", filename);
-        deflate_index_free(index);
-        fclose(in);
-        return;
-    }
+    fprintf(stderr, "zran: attempting to write index to %s\n", filename_gzip);
+
+//    // Open the index file for writing.
+//    FILE *idx = fopen(filename, "wb");
+//    if (idx == NULL) {
+//        fprintf(stderr, "zran: could not open %s for writing\n", filename_gzip);
+//        deflate_index_free(index);
+//        fclose(in);
+//        return;
+//    }
+
+    gzFile idx_gzip = gzopen(filename_gzip, "wb");
 
     // Write the index to the file.
-    len = deflate_index_save(idx, index);
+//    len = deflate_index_save(idx, index);
+    len = deflate_index_save_gzip(idx_gzip, index);
+
     if (len != 0) {
-        fclose(idx);
-        fprintf(stderr, "zran: write error on %s\n", filename);
+//        fclose(idx);
+        fprintf(stderr, "zran: write error on %s\n", filename_gzip);
         deflate_index_free(index);
         fclose(in);
         return;
     }
-    fprintf(stderr, "zran: wrote index with %d access points to %s\n", index->have, filename);
+    fprintf(stderr, "zran: wrote index with %d access points to %s\n", index->have, filename_gzip);
 
     // Clean up and exit
-    fclose(idx);
+//    fclose(idx);
     free(filename);
     deflate_index_free(index);
     fclose(in);
@@ -623,18 +752,20 @@ void build_index(const char * gzFile, off_t span) {
 
 off_t get_read_len(struct deflate_index *index, off_t record_idx, off_t num_records) {
     if (record_idx >= (index->record_boundaries->size() - num_records)) {
-      num_records = index->record_boundaries->size() - record_idx - 1;
+        num_records = index->record_boundaries->size() - record_idx - 1;
     }
     off_t read_len = (*index->record_boundaries)[record_idx + num_records] - (*index->record_boundaries)[record_idx];
     return read_len;
 }
 
 // TODO: This should be named something else like read_records
-std::pair<unsigned char*, int> read_index(const char * gzFile, struct deflate_index *index, off_t record_idx, off_t num_records, unsigned char* buf = NULL) {
+std::pair<unsigned char *, int>
+read_index(const char *gzFile, struct deflate_index *index, off_t record_idx, off_t num_records,
+           unsigned char *buf = NULL) {
     FILE *in = fopen(gzFile, "rb");
     if (in == NULL) {
         throw runtime_error("Could not open the given gzFile for reading");
-        return std::make_pair<unsigned char*, int>(NULL, -1);
+        return std::make_pair<unsigned char *, int>(NULL, -1);
     }
     //fprintf(stderr, "Extracting %d record\n", record_idx);
 
@@ -647,7 +778,7 @@ std::pair<unsigned char*, int> read_index(const char * gzFile, struct deflate_in
 
     // TODO: Use shared pointer
     if (buf == NULL) {
-        buf = (unsigned char*) malloc(read_len);
+        buf = (unsigned char *) malloc(read_len);
     }
     ptrdiff_t got = deflate_index_extract(in, index, offset, buf, read_len);
 
@@ -662,7 +793,8 @@ std::pair<unsigned char*, int> read_index(const char * gzFile, struct deflate_in
     return std::make_pair(buf, got);
 }
 
-std::pair<unsigned char*, int> read_index(const char * gzFile, const char * indexFile, off_t record_idx, off_t num_records) {
+std::pair<unsigned char *, int>
+read_index(const char *gzFile1, const char *indexFile, off_t record_idx, off_t num_records) {
     struct deflate_index *index = NULL;
     int len;
 
@@ -671,10 +803,13 @@ std::pair<unsigned char*, int> read_index(const char * gzFile, const char * inde
     FILE *index_file = fopen(indexFile, "rb");
     if (index_file == NULL) {
         fprintf(stderr, "zran: could not open index for reading\n");
-        return std::make_pair<unsigned char*, int>(NULL, -1);
+        return std::make_pair<unsigned char *, int>(NULL, -1);
     }
 
-    len = deflate_index_load(index_file, &index);
+    gzFile index_file_gzip = gzopen(indexFile, "rb");
+
+//    len = deflate_index_load(index_file, &index);
+    len = deflate_index_load_gzip(index_file_gzip, &index);
     fclose(index_file);
 
     if (len < 0) {
@@ -694,8 +829,8 @@ std::pair<unsigned char*, int> read_index(const char * gzFile, const char * inde
             default:
                 throw runtime_error("Saw error while building index");
         }
-        return std::make_pair<unsigned char*, int>(NULL, -1);
+        return std::make_pair<unsigned char *, int>(NULL, -1);
     }
     fprintf(stderr, "zran: read index with %d access points!\n", len);
-    return read_index(gzFile, index, record_idx, num_records);
+    return read_index(gzFile1, index, record_idx, num_records);
 }

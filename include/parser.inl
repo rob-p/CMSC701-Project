@@ -121,7 +121,9 @@ int ParrFQParser::loadIndex(const std::string& indexFileName) {
     fprintf(stderr, "Could not open index for reading\n");
     return -1;
   }
-  int len = deflate_index_load(indexFile, &index);
+  //int len = deflate_index_load(indexFile, &index);
+  gzFile index_file_gzip = gzopen(indexFileName.c_str(), "rb");
+  int len = deflate_index_load_gzip(index_file_gzip, &index);
   fclose(indexFile);
   if (len < 0) {
     fprintf(stderr, "Could not load index %d\n", len);
