@@ -163,7 +163,14 @@ int deflate_index_save(FILE *out, struct deflate_index *index) {
 
 // Save index to gzip file.
 int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
+    long long int index_size = 0;
+    long long int offset_size = 0;
     // Write metadata
+    index_size += sizeof(index->mode);
+    index_size += sizeof(index->have);
+    index_size += sizeof(index->length);
+    index_size += sizeof(index->num_records);
+
     auto start = std::chrono::high_resolution_clock::now();
     if (gzwrite(out, &index->mode, sizeof(index->mode)) != sizeof(index->mode) ||
         gzwrite(out, &index->have, sizeof(index->have)) != sizeof(index->have) ||
@@ -174,6 +181,10 @@ int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
     // Write access points
     for (int i = 0; i < index->have; i++) {
         point_t *point = index->list + i;
+        index_size += sizeof(point->out);
+        index_size += sizeof(point->in);
+        index_size += sizeof(point->bits);
+        index_size += point->dict;
         if (gzwrite(out, &point->out, sizeof(point->out)) != sizeof(point->out) ||
             gzwrite(out, &point->in, sizeof(point->in)) != sizeof(point->in) ||
             gzwrite(out, &point->bits, sizeof(point->bits)) != sizeof(point->bits) ||
@@ -184,6 +195,8 @@ int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
 
     // Write record boundaries
     size_t boundaries_count = index->record_boundaries->size();
+    offset_size += sizeof(boundaries_count);
+    offset_size += sizeof(uint64_t) * boundaries_count;
     if (gzwrite(out, &boundaries_count, sizeof(boundaries_count)) != sizeof(boundaries_count) ||
         gzwrite(out, index->record_boundaries->data(), sizeof(uint64_t) * boundaries_count) !=
         sizeof(uint64_t) * boundaries_count)
@@ -192,6 +205,8 @@ int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
     gzclose(out);
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+    cout << "index_size " << index_size << " " << (index_size * 1.0) / (index_size * 1.0 + offset_size * 1.0) << endl;
+    cout << "offset_size " << offset_size << " " << (offset_size * 1.0) / (index_size * 1.0 + offset_size * 1.0) << endl;
     cout << "Time to save the gzip index " << duration.count() << " milliseconds" << endl;
     return 0;
 }
@@ -335,7 +350,7 @@ int deflate_index_load_gzip(gzFile in, struct deflate_index **built) {
     *built = index;
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    cout << "Time to load the gzip index " << duration.count() << " milliseconds" << endl;
+    cerr << "Time to load the gzip index " << duration.count() << " milliseconds" << endl;
     return index->have;
 }
 

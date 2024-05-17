@@ -61,10 +61,10 @@ int main(int argc, char **argv) {
         }
         KseqCharStreamIn in(reinterpret_cast<const char*>(buf), got);
 
-        klibpp::KSeq rec;
-        while (in >> rec) {
-          cout << rec.seq << endl;
-        }
+//        klibpp::KSeq rec;
+//        while (in >> rec) {
+//          cout << rec.seq << endl;
+//        }
     }
     return 0;
 }
