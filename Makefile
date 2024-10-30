@@ -1,4 +1,4 @@
-CC=g++
+CC=c++
 CFLAGS=-I.
 
 main: main.cpp
