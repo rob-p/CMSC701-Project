@@ -744,25 +744,38 @@ inline void build_index(const char *gzFile1, off_t span) {
   index->record_boundaries = new vector<uint64_t>();
   index->record_chunk_size = RECORD_SPAN;
   size_t within_chunk_count = 0;
-  while (iss >> record) {
-    if (within_chunk_count++ == 0) {
-      index->record_boundaries->push_back(record.bytes_offset);
+  if (index->have == 0) {
+    fprintf(stderr, "no access points created");
+    index->record_boundaries->push_back(0);
+    off_t last_record_end{0};
+    while (iss >> record) {
+      auto last_record_start = record.bytes_offset;
+      last_record_end = last_record_start + record.name.size() + record.comment.size() + record.seq.size() + record.qual.size()
     }
-    if (within_chunk_count == RECORD_SPAN) {
-      within_chunk_count = 0;
+    index->num_record_chunks = 1;
+  } else {
+    auto* current_access_point = index->points[0];
+    off_t next_decomp_checkpoint = index->points
+    while (iss >> record) {
+      if (within_chunk_count++ == 0) {
+        index->record_boundaries->push_back(record.bytes_offset);
+      }
+      if (within_chunk_count == RECORD_SPAN) {
+        within_chunk_count = 0;
+      }
     }
-  }
-  index->num_record_chunks = index->record_boundaries->size();
-  // TODO: What? This seems like a hack and potentially unsafe; figure out
-  // what to do here.
-  //
-  // Adding 1000 as a buffer because kseqc++ removes some characters while
-  // parsing the records.
-  uint64_t end_offset =
+    index->num_record_chunks = index->record_boundaries->size();
+    // TODO: What? This seems like a hack and potentially unsafe; figure out
+    // what to do here.
+    //
+    // Adding 1000 as a buffer because kseqc++ removes some characters while
+    // parsing the records.
+    uint64_t end_offset =
       1000 + (record.bytes_offset + record.name.size() + record.comment.size() +
-              record.seq.size() + record.qual.size());
-  index->record_boundaries->push_back(end_offset);
-  fprintf(stderr, "Got records boundaries from FASTQ file\n");
+      record.seq.size() + record.qual.size());
+    index->record_boundaries->push_back(end_offset);
+    fprintf(stderr, "Got records boundaries from FASTQ file\n");
+  }
 
   // Save index to file
   char *filename = (char *)malloc(strlen(gzFile1) + 6);
