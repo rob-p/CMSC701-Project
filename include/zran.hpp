@@ -740,7 +740,7 @@ inline void build_index(const char *gzFile1, off_t span) {
   fprintf(stderr, "Getting records boundaries from FASTQ file\n");
   klibpp::KSeq record;
   klibpp::SeqStreamIn iss(gzFile1);
-  uint64_t RECORD_SPAN = 10000;
+  uint64_t RECORD_SPAN = 1000000;
   index->record_boundaries = new vector<uint64_t>();
   index->record_chunk_size = RECORD_SPAN;
   size_t within_chunk_count = 0;
