@@ -4,7 +4,7 @@ ParrFQParser::~ParrFQParser() {
   }
 }
 
-int ParrFQParser::init (const std::string& fastqFilename, const std::string& indexFileName, uint64_t perThreadReads, uint64_t numThreads) {
+int ParrFQParser::init (const std::string& fastqFilename, const std::string& indexFileName, uint64_t num_consumers, uint64_t perThreadReads, uint64_t numThreads) {
   m_fastqFilename = fastqFilename;
   m_indexFileName = indexFileName;
   m_perThreadReads = perThreadReads;
@@ -20,6 +20,50 @@ int ParrFQParser::init (const std::string& fastqFilename, const std::string& ind
   return 0;
 }
 
+int ParrFQParser::init2(const std::string& fastqFilename, const std::string& indexFileName, uint64_t num_consumers) {
+  m_fastqFilename = fastqFilename;
+  m_indexFileName = indexFileName;
+  m_perThreadReads = 0;//perThreadReads;
+  m_numThreads = 0;//numThreads;
+  m_currMaxOffset = 0;
+
+  m_readQueue = std::make_unique<moodycamel::ConcurrentQueue<klibpp::KSeq>>();
+
+  for (uint64_t i = 0; i < m_numThreads; ++i) {
+    m_producerTokens.emplace_back(std::make_unique<moodycamel::ProducerToken>(*m_readQueue));
+  }
+
+  return 0;
+}
+
+ReadChunk ParrFQParser::get_read_chunk() {
+  struct deflate_index* idx = m_index.get();
+  return ReadChunk(m_fastqFilename, idx);
+}
+
+// takes a read chunk, given to us by an underlying 
+// consumer thread, and fills it.
+bool ParrFQParser::refill(ReadChunk& tlc) {
+  chunk_lock.lock();
+  uint64_t next_chunk = chunk_counter_++;
+  if (next_chunk >= m_index->have) {
+    chunk_lock.unlock();
+    // no more chunks!
+    return false;
+  }
+  chunk_lock.unlock();
+
+  bool got_chunk = get_uncompressed_chunk(tlc.file_ptr_.get(), tlc.idx_ptr_, next_chunk, tlc.data_);
+  if (got_chunk) {
+    std::cerr << "thread got chunk " << next_chunk << " / " << m_index->have << "\n";
+    tlc.in_stream_.reset(new KseqCharStreamIn(reinterpret_cast<const char*>(tlc.data_.data()), tlc.data_.size()));
+  } else {
+    std::cerr << "failed to get chunk";
+  }
+  return got_chunk;
+}
+
+
 int ParrFQParser::parse_reads(uint64_t threadId, moodycamel::ProducerToken* token, uint64_t maxBufLen) {
   // Load the index file
   // Create a shallow copy of the index object for each thread
@@ -31,7 +75,7 @@ int ParrFQParser::parse_reads(uint64_t threadId, moodycamel::ProducerToken* toke
 
   while (true) {
     uint64_t startRecordIdx = m_currMaxOffset.fetch_add(this->m_perThreadReads);
-    if (startRecordIdx >= indexPerThread->num_records) {
+    if (startRecordIdx >= indexPerThread->num_record_chunks) {
       // All records in the file have been or are being processed
       // This thread has nothing more to do
       break;
@@ -55,6 +99,32 @@ int ParrFQParser::parse_reads(uint64_t threadId, moodycamel::ProducerToken* toke
 
   delete[] buf;
   --m_numActiveThreads;
+  return 0;
+}
+
+int ParrFQParser::start2() {
+  if (m_isRunning == true) {
+    std::cout << "ParrFQParser is already running" << std::endl;
+    return -1;
+  }
+
+  // Load the index
+  int ret = loadIndex(m_indexFileName);
+  if (ret != 0) return ret;
+
+
+  // Get the maximum buffer length required to store the reads based on the index
+  chunk_counter_ = 0;
+  m_isRunning = true;
+  return 0;
+}
+
+int ParrFQParser::stop2() {
+  if (m_isRunning == false) {
+    std::cout << "ParrFQParser is not running" << std::endl;
+    return -1;
+  }
+  m_isRunning = false;
   return 0;
 }
 
@@ -138,7 +208,7 @@ uint64_t ParrFQParser::getMaxBufLen() {
     return 0;
   }
   uint64_t maxBufLen = 0;
-  for (uint64_t i = 0; i < m_index->num_records; i+=m_perThreadReads) {
+  for (uint64_t i = 0; i < m_index->num_record_chunks; i+=m_perThreadReads) {
     // Find all possible lengths of the buffer given the m_perThreadReads and the index to pre-allocate the buffer per thread
     uint64_t bufLen = get_read_len(m_index.get(), i, m_perThreadReads);
     if (bufLen > maxBufLen) {

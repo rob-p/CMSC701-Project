@@ -36,8 +36,6 @@ int main(int argc, char* argv[]) {
       while (true) {
         if (parser.refill(rg)) {
           auto chunk_frag_offset = rg.chunk_frag_offset();
-          std::cerr << "chunk_offset_info: [file_idx: " << chunk_frag_offset.file_idx 
-                    << ", frag_idx:" << chunk_frag_offset.frag_idx << ", chunk_size: " << rg.size() <<"]\n";
           for (auto& seq : rg) {
             ++lctr;
 
