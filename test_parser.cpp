@@ -58,8 +58,6 @@ int main(int argc, char* argv[]) {
   for (size_t i = 0; i < nt; ++i) {
     readers.emplace_back([&, i]() {
       auto rg = parser.get_read_chunk();
-      size_t lctr{0};
-      size_t pctr{0};
       klibpp::KSeq seq;
       uint64_t cur_rec{0};
       while (parser.refill(rg)) {
