@@ -26,6 +26,11 @@ public:
   struct deflate_index* idx_ptr_{nullptr}; // this reader's local file ptr
   std::unique_ptr<KseqCharStreamIn> in_stream_{nullptr};
   std::vector<unsigned char> data_;
+  // the number of records we expect to parse from
+  // this chunk.
+  uint64_t expected_rec;
+  // the underlying assigned chunk num
+  uint64_t chunk_num;
 };
 
 class ParrFQParser {
@@ -37,39 +42,19 @@ public:
   ~ParrFQParser();
 
   int init(const std::string &fastqFilename, const std::string &indexFileName,
-           uint64_t num_consumers,
-           uint64_t perThreadReads, uint64_t numThreads);
-
-  int init2(const std::string &fastqFilename, const std::string &indexFileName,
            uint64_t num_consumers);
 
-
-  ReadChunk get_read_chunk();
-  bool refill(ReadChunk& tlc);
-
-  // Main function that will be called by each thread to parse the reads
-  int parse_reads(uint64_t threadId, moodycamel::ProducerToken *token,
-                  uint64_t maxBufLen);
 
   // Start and stop the parser
   int start();
   int stop();
-  int start2();
-  int stop2();
-
+  uint64_t get_num_chunks();
 
   // Consumer functions
-  moodycamel::ConsumerToken getConsumerToken();
-  bool getRead(moodycamel::ConsumerToken &token, klibpp::KSeq &rec);
-  bool checkFinished();
+  ReadChunk get_read_chunk();
+  bool refill(ReadChunk& tlc);
 
 private:
-  // Each parser thread will check and update the current offset to claim a
-  // chunk of reads
-  std::atomic<uint64_t> m_currMaxOffset;
-  std::vector<std::unique_ptr<std::thread>> m_workers;
-  std::unique_ptr<moodycamel::ConcurrentQueue<klibpp::KSeq>> m_readQueue;
-  std::vector<std::unique_ptr<moodycamel::ProducerToken>> m_producerTokens;
   std::unique_ptr<struct deflate_index,
                   std::function<void(struct deflate_index *)>>
       m_index;
@@ -80,9 +65,7 @@ private:
   std::string m_fastqFilename;
   std::string m_indexFileName;
   bool m_isRunning = false;
-  std::mutex chunk_lock;
   std::atomic_uint64_t chunk_counter_{0};
-  std::atomic<uint32_t> m_numActiveThreads{0};
 
   // Helper functions
   int loadIndex(const std::string &indexFileName);

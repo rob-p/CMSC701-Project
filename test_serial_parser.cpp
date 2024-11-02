@@ -13,10 +13,11 @@ int main(int argc, char* argv[])
   // auto ks = KStreamIn(fp, gzread);  // C++17
   int nr = 0;
   while ((ks >> record) && (nr < 5)) {
-    std::cout << record.name << std::endl;
-    if (!record.comment.empty()) std::cout << record.comment << std::endl;
+    std::cout << "bytes start: " << record.bytes_offset << "\n";
+    std::cout << '@' << record.name << std::endl;
     std::cout << record.seq << std::endl;
-    if (!record.qual.empty()) std::cout << record.qual << std::endl;
+    std::cout << '+' << record.comment << std::endl;
+    std::cout << record.qual << std::endl;
     ++nr;
   }
   gzclose(fp);

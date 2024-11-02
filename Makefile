@@ -10,9 +10,6 @@ offsets: offsets.cpp
 test_parser: test_parser.cpp
 	$(CC) -std=c++17 -Wall -O3 -o test_parser.out test_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
 
-test_parser2: test_parser2.cpp
-	$(CC) -std=c++17 -Wall -O3 -o test_parser2.out test_parser2.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
-
 test_serial_parser: test_serial_parser.cpp
 	$(CC) -std=c++17 -Wall -O3 -o test_serial_parser.out test_serial_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
 

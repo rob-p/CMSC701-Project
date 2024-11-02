@@ -31,6 +31,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <iostream>
 
 #include "config.hpp"
 
@@ -484,7 +485,7 @@ namespace klibpp {
           this->is_ready = false;
           this->last = false;
           this->counter = 0;
-          this->bytes_so_far= -1 * DEFAULT_BUFSIZE;
+          this->bytes_so_far= 0;//-1 * DEFAULT_BUFSIZE;
         }
 
         KStream( TFile f_,
@@ -525,7 +526,7 @@ namespace klibpp {
           this->f = std::move( other.f );
           this->func = std::move( other.func );
           this->close = other.close;
-          this->bytes_so_far= -1 * DEFAULT_BUFSIZE;
+          this->bytes_so_far= 0;
         }
 
         KStream& operator=( KStream&& other ) noexcept
@@ -663,7 +664,7 @@ namespace klibpp {
           // fetch
           if ( this->begin >= this->end ) {
             this->begin = 0;
-            this->bytes_so_far += this->bufsize;
+            this->bytes_so_far += this->end;//this->bufsize;
             this->end = this->func( this->f, this->buf, this->bufsize );
             if ( this->end <= 0 ) {  // err if end == -1 and eof if 0
               this->is_eof = true;

@@ -79,6 +79,7 @@ struct deflate_index {
   vector<record_checkpoint>
       *record_boundaries;  // stores bytes offsets of records in FASTQ file
   off_t num_record_chunks; // number of records in FASTQ file
+  off_t total_record_count;
 
   deflate_index() {
     have = -1;
@@ -86,6 +87,7 @@ struct deflate_index {
     length = 0;
     list = nullptr;
     num_record_chunks = 0;
+    total_record_count = 0;
   }
 
   // Copy constructor - Shallow copy
@@ -98,6 +100,7 @@ struct deflate_index {
     inflateCopy(&strm, &other.strm);
     record_boundaries = other.record_boundaries;
     num_record_chunks = other.num_record_chunks;
+    total_record_count = other.total_record_count;
   }
 };
 
@@ -231,6 +234,11 @@ inline int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
       gzwrite(out, index->record_boundaries->data(),
               elem_t_size * boundaries_count) != elem_t_size * boundaries_count)
     return Z_ERRNO;
+  
+  index_size += sizeof(index->total_record_count);
+  if (gzwrite(out, &index->total_record_count, sizeof(index->total_record_count)) != sizeof(index->total_record_count)) {
+    return Z_ERRNO;
+  }
 
   gzclose(out);
   auto end = std::chrono::high_resolution_clock::now();
@@ -386,6 +394,11 @@ inline int deflate_index_load_gzip(gzFile in, struct deflate_index **built) {
     return Z_ERRNO;
   }
 
+  off_t total_record_count{0};
+  if (gzread(in, &total_record_count, sizeof(total_record_count)) != sizeof(total_record_count)) {
+    return Z_ERRNO;
+  }
+  index->total_record_count = total_record_count;
   gzclose(in);
 
   // Initialize inflation state
@@ -401,6 +414,7 @@ inline int deflate_index_load_gzip(gzFile in, struct deflate_index **built) {
       std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
   cerr << "Time to load the gzip index " << duration.count() << " milliseconds"
        << endl;
+  cerr << "total record count: " << index->total_record_count << "\n";
   return index->have;
 }
 
@@ -751,32 +765,23 @@ inline void build_index(const char *gzFile1, off_t span) {
   }
 
   fprintf(stderr, "zran: built index with %d access points!\n", len);
-  print_index(index);
+  //print_index(index);
   fprintf(stderr, "Getting records boundaries from FASTQ file\n");
   klibpp::KSeq record;
   klibpp::SeqStreamIn iss(gzFile1);
   uint64_t RECORD_SPAN = 1000000;
   index->record_boundaries = new vector<record_checkpoint>();
   index->record_chunk_size = RECORD_SPAN;
-  // the parser strips a trailing newline from each line (4)
-  // as well as a header '@' (1)
-  // as well as the leading '+' of the comment line (1)
-  constexpr size_t num_stripped_bytes = 6; 
-  auto record_size = [](const auto& record) -> off_t {
-    return record.name.size() + record.comment.size() + record.seq.size() + record.qual.size()
-        + num_stripped_bytes;
-  };
 
   size_t record_count = 0;
   if (index->have == 0) {
     fprintf(stderr, "no access points created");
     index->record_boundaries->push_back({0, 0});
-    off_t last_record_end{0};
     while (iss >> record) {
       auto last_record_start = record.bytes_offset;
-      last_record_end = last_record_start + record_size(record);
+      ++record_count;
     }
-    index->record_boundaries->push_back({record_count, last_record_end});
+    index->record_boundaries->push_back({record_count, index->length});
     index->num_record_chunks = 1;
   } else {
     // since `have` >= there must be a first element here
@@ -790,7 +795,7 @@ inline void build_index(const char *gzFile1, off_t span) {
         // distance from checkpoint to the record start
         uint64_t diff = record_start - next_decomp_checkpoint;
         index->record_boundaries->push_back({record_count, record_start});
-        fprintf(stderr, "matched checkpoint %ld with record starting at %ld; diff %ld\n", next_decomp_checkpoint, record_start, diff);
+        //fprintf(stderr, "matched checkpoint %ld with record starting at %ld; diff %ld\n", next_decomp_checkpoint, record_start, diff);
         current_access_index += 1;
         if (current_access_index < index->have) {
           current_access_point = index->list[current_access_index];
@@ -799,16 +804,11 @@ inline void build_index(const char *gzFile1, off_t span) {
       }
       ++record_count;
     }
-
+  
+    index->record_boundaries->push_back({record_count, index->length});
     index->num_record_chunks = index->record_boundaries->size();
-    // TODO: What? This seems like a hack and potentially unsafe; figure out
-    // what to do here.
-    //
-    // Adding 1000 as a buffer because kseqc++ removes some characters while
-    // parsing the records.
-    uint64_t end_offset = record_start + record_size(record);
-    index->record_boundaries->push_back({record_count, end_offset});
-    fprintf(stderr, "Got records boundaries from FASTQ file\n");
+    index->total_record_count = record_count;
+    fprintf(stderr, "Got %ld records boundaries from FASTQ file.\n", record_count);
   }
 
   // Save index to file
@@ -859,50 +859,26 @@ inline void build_index(const char *gzFile1, off_t span) {
   return;
 }
 
-inline off_t get_read_len(struct deflate_index *index, off_t record_idx,
-                          off_t num_record_chunks) {
-  /*
-  if (record_idx >= (index->record_boundaries->size() - num_record_chunks)) {
-    num_record_chunks = index->record_boundaries->size() - record_idx - 1;
-  }
-  off_t read_len = (*index->record_boundaries)[record_idx + num_record_chunks] -
-                   (*index->record_boundaries)[record_idx];
-  return read_len;
-  */
-  return 0;
-}
-
-// returns the size, in bytes, of the next chunk that is to be read
-inline off_t get_next_chunk_len(struct deflate_index *index, off_t chunk_idx) {
-  /*
-  off_t to_read = 0;
-  if (chunk_idx >= (index->record_boundaries->size() - num_record_chunks)) {
-    to_read = index->record_boundaries->size() - record_idx - 1;
-  }
-  off_t read_len = (*index->record_boundaries)[record_idx + num_record_chunks] -
-                   (*index->record_boundaries)[record_idx];
-  return read_len;
-  */
-}
-
-bool get_uncompressed_chunk(FILE *fptr, struct deflate_index* index, size_t chunk_idx, std::vector<unsigned char>& buf) {
+bool get_uncompressed_chunk(FILE *fptr, struct deflate_index* index, size_t chunk_idx, std::vector<unsigned char>& buf, uint64_t& expected_rec) {
   if (fptr == nullptr) {
     throw std::runtime_error("zran::get_uncompressed_chunk:: The file pointer is invalid");
   }
   if (chunk_idx >= index->record_boundaries->size()) {
+    // user requested an invalid chunk
     return false;
   }
 
   // otherwise we can get the chunk
   // uncompressed byte offset at the start of the chunk
   off_t chunk_start = index->list[chunk_idx].out;
-  // uncompressed byte offset at the star of the next chunk
-  off_t next_chunk_start = (chunk_idx < index->have) ? index->list[chunk_idx + 1].out : index->length;
   // uncompressed byte offset at the start of the first read record in this chunk
   uint64_t rec_start = (*index->record_boundaries)[chunk_idx].byte_offset;
+  uint64_t rec_count = (*index->record_boundaries)[chunk_idx].first_record_in_chunk;
   // uncompressed byte offset at the start of the first read record in the next chunk
   uint64_t next_rec_start = (*index->record_boundaries)[chunk_idx + 1].byte_offset;
- 
+  uint64_t next_rec_count = (*index->record_boundaries)[chunk_idx + 1].first_record_in_chunk;
+
+  expected_rec = next_rec_count - rec_count;
   uint64_t want = next_rec_start - rec_start;
   if (buf.size() < want) {
     buf.resize(want);

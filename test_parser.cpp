@@ -1,4 +1,6 @@
 #include "parser.hpp"
+#include "indicators.hpp"
+#include "CLI11.hpp"
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -6,21 +8,23 @@
 using namespace std;
 
 struct Bases {
-  uint32_t A, C, G, T;
+  uint64_t A, C, G, T;
 };
 
 int main(int argc, char* argv[]) {
-  if (argc < 5) {
-    std::cerr << "Command line arguments not provided\n";
-    std::cerr << "Usage ./test_parser <fastq_file> <index_file> <num_consumer_threads> <num_producer_threads>\n";
-  }
-  std::string fastqFile = argv[1];
-  std::string indexFile = argv[2];
-  size_t nt = stoi(argv[3]);  // number of consumer threads
-  size_t np = stoi(argv[4]);  // number of producer threads
+  CLI::App app{"test program for ffparser"};
+  argv = app.ensure_utf8(argv);
+ 
+  std::string fastqFile;
+  std::string indexFile;
+  size_t nt{4};
+  app.add_option<std::string>("fastq-path", fastqFile, "path to input fastq file.")->required();
+  app.add_option<std::string>("fastq-index-path", indexFile, "path to input fastq file index.")->required();
+  app.add_option<size_t>("num-threads", nt, "number of parsing threads to use.")->required();
+  CLI11_PARSE(app, argc, argv);
 
   ParrFQParser parser;
-  parser.init(fastqFile, indexFile, 10000, np);
+  parser.init(fastqFile, indexFile, nt);
 
   auto start = std::chrono::high_resolution_clock::now();
   cout << "Starting parsing" << endl;
@@ -28,17 +32,42 @@ int main(int argc, char* argv[]) {
 
   cout << "Parsers Started" << endl;
 
+  using namespace indicators;
+
+  // Hide cursor
+  show_console_cursor(false);
+
+  indicators::ProgressBar bar{
+    option::BarWidth{50},
+    option::Start{" ["},
+    option::Fill{"█"},
+    option::Lead{"█"},
+    option::Remainder{"-"},
+    option::End{"]"},
+    option::MaxProgress{parser.get_num_chunks()},
+    option::ForegroundColor{Color::yellow},
+    option::ShowElapsedTime{true},
+    option::ShowRemainingTime{true},
+    option::FontStyles{std::vector<FontStyle>{FontStyle::bold}}
+  };
+
+
   std::vector<std::thread> readers;
   std::vector<Bases> counters(nt, {0, 0, 0, 0});
   std::atomic<size_t> ctr{0};
   for (size_t i = 0; i < nt; ++i) {
     readers.emplace_back([&, i]() {
-      auto rg = parser.getConsumerToken();
+      auto rg = parser.get_read_chunk();
       size_t lctr{0};
       size_t pctr{0};
       klibpp::KSeq seq;
-      while (true) {
-        if (parser.getRead(rg, seq)) {
+      uint64_t cur_rec{0};
+      while (parser.refill(rg)) {
+        bar.tick();
+        auto& seq_stream = rg.get_seq_stream();
+        while (seq_stream >> seq) { 
+            //std::cerr << "rec : " << j << " / " << expected_rec << "\n";
+            ++cur_rec;
             for (size_t j = 0; j < seq.seq.length(); ++j) {
               char c = seq.seq[j];
               switch (c) {
@@ -58,16 +87,15 @@ int main(int argc, char* argv[]) {
                 break;
               }
             }
-          ctr += (lctr - pctr);
-          pctr = lctr;
-          if (lctr > 1000000) {
-              lctr = 0;
-              pctr = 0;
-              //std::cout << "parsed " << ctr << " read pairs.\n";
-          }
-        } else if (parser.checkFinished()) {
-          break;
         }
+        if (cur_rec != rg.expected_rec) {
+          std::cerr << "CHUNK NUM : " << rg.chunk_num << ", observed rec : " << cur_rec << ", expected rec : " << rg.expected_rec << "\n";
+          std::cerr << "last_name: " << seq.name << ", seq : " << seq.seq << "\n";
+        }
+
+        ctr += cur_rec; 
+        cur_rec = 0;
+
       }
     });
   }
@@ -75,8 +103,10 @@ int main(int argc, char* argv[]) {
   for (auto& t : readers) {
     t.join();
   }
-
+  bar.mark_as_completed();
   parser.stop();
+  // Show cursor
+  indicators::show_console_cursor(true);
 
   Bases b = {0, 0, 0, 0};
   for (size_t i = 0; i < nt; ++i) {

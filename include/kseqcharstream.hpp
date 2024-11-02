@@ -9,10 +9,21 @@ struct CharBuffer {
   size_t size;
   int index;
 
+  CharBuffer() = delete;
+  CharBuffer(const CharBuffer& other) = default;
+  CharBuffer& operator=(const CharBuffer& other) = default;
+  CharBuffer& operator=(CharBuffer&& other) = default;
+
+  CharBuffer(CharBuffer&& other) {
+    buffer = other.buffer;
+    other.buffer = nullptr;
+    size = other.size;
+    index = other.index;
+  }
   CharBuffer( const char* buffer, size_t size ) : buffer(buffer), size(size), index(0) {}
 
-  int copy( void* data, unsigned int bytesToCopy) {
-    if ( size - index < bytesToCopy ) {
+  int copy(void* data, unsigned int bytesToCopy) {
+    if (size - index < bytesToCopy) {
       bytesToCopy = size - index;
     }
     std::memcpy(data, buffer + index, bytesToCopy);
