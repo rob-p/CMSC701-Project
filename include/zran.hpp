@@ -26,6 +26,13 @@
  *
  * Jean-loup Gailly        Mark Adler
  * jloup@gzip.org          madler@alumni.caltech.edu
+ *
+ *
+ * Modified by:
+ * Siddhant Bharti <sbharti@umd.edu>
+ * Prajwal Singhania <prajwal@umd.edu>,
+ * Rakrish Dhakal <rakrish@umd.edu>,
+ * Rob Patro <rob@cs.umd.edu>
  */
 
 #include "kseq++/seqio.hpp"
