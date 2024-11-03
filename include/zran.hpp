@@ -69,6 +69,8 @@ typedef struct point {
   unsigned char *window; // preceding 32K (or less) of uncompressed data
 } point_t;
 
+// Information necessary for getting the first record
+// after an access point.
 struct record_checkpoint {
   uint64_t first_record_in_chunk; // the record number of the first record in this chunk
   uint64_t byte_offset; // byte offset of the record in the chunk
@@ -79,9 +81,8 @@ struct deflate_index {
   int have;              // number of access points in list
   int mode;              // -15 for raw, 15 for zlib, or 31 for gzip
   off_t length;          // total length of uncompressed data
-  //std::vector<point_t> access_points;
-  std::vector<point> list;
-  //point_t *list;         // allocated list of access points
+  std::vector<point_t>* list; // allocated list of access points
+  //point_t *list;        /* got rid of this in favor of vector above */ 
   z_stream strm;         // re-usable inflate engine for extraction
   int record_chunk_size; // the number of records in each chunk
   vector<record_checkpoint>
@@ -93,7 +94,7 @@ struct deflate_index {
     have = -1;
     mode = -1;
     length = 0;
-    list = std::vector<point>();
+    list = nullptr;//std::vector<point>();
     num_record_chunks = 0;
     total_record_count = 0;
   }
@@ -103,7 +104,6 @@ struct deflate_index {
     have = other.have;
     mode = other.mode;
     length = other.length;
-    //access_points = other.access_points;
     list = other.list;
     inflateCopy(&strm, &other.strm);
     record_boundaries = other.record_boundaries;
@@ -142,7 +142,7 @@ inline void print_index(struct deflate_index *index) {
   std::cout << "record chunk size: " << index->record_chunk_size << std::endl;
   // Print access points
   for (int i = 0; i < index->have; i++) {
-    print_point(index->list[i]);
+    print_point((*index->list)[i]);
   }
   std::cout << "========================================" << std::endl;
 }
@@ -152,7 +152,7 @@ inline void deflate_index_free(struct deflate_index *index) {
   if (index != nullptr) {
     size_t i = index->have;
     while (i)
-      free(index->list[--i].window);
+      free((*index->list)[--i].window);
     //free(index->list);
     inflateEnd(&index->strm);
     free(index);
@@ -172,7 +172,7 @@ inline int deflate_index_save(FILE *out, struct deflate_index *index) {
 
   // Write access points
   for (int i = 0; i < index->have; i++) {
-    point_t& point = index->list[i];
+    point_t& point = (*index->list)[i];
     if (fwrite(&point.out, sizeof(point.out), 1, out) != 1 ||
         fwrite(&point.in, sizeof(point.in), 1, out) != 1 ||
         fwrite(&point.bits, sizeof(point.bits), 1, out) != 1 ||
@@ -219,7 +219,7 @@ inline int deflate_index_save_gzip(gzFile out, struct deflate_index *index) {
 
   // Write access points
   for (int i = 0; i < index->have; i++) {
-    point_t& point = index->list[i];
+    point_t& point = (*index->list)[i];
     index_size += sizeof(point.out);
     index_size += sizeof(point.in);
     index_size += sizeof(point.bits);
@@ -286,7 +286,7 @@ inline int deflate_index_load(FILE *in, struct deflate_index **built) {
   }
 
   // Read access points
-  index->list.resize(index->have); //= (point_t *)malloc(sizeof(point_t) * index->have);
+  index->list->resize(index->have); //= (point_t *)malloc(sizeof(point_t) * index->have);
   /*
   if (index->list == nullptr) {
     deflate_index_free(index);
@@ -295,7 +295,7 @@ inline int deflate_index_load(FILE *in, struct deflate_index **built) {
   */
 
   for (int i = 0; i < index->have; i++) {
-    point_t& point = index->list[i];
+    point_t& point = (*index->list)[i];
     if (fread(&point.out, sizeof(point.out), 1, in) != 1 ||
         fread(&point.in, sizeof(point.in), 1, in) != 1 ||
         fread(&point.bits, sizeof(point.bits), 1, in) != 1 ||
@@ -364,7 +364,8 @@ inline int deflate_index_load_gzip(gzFile in, struct deflate_index **built) {
     return Z_ERRNO;
 
   // Read access points
-  index->list.resize(index->have);//= (point_t *)malloc(sizeof(point_t) * index->have);
+  index->list = new std::vector<point_t>(index->have);
+  //index->list->resize(index->have);//= (point_t *)malloc(sizeof(point_t) * index->have);
   /*
   if (index->list == nullptr) {
     deflate_index_free(index);
@@ -373,7 +374,7 @@ inline int deflate_index_load_gzip(gzFile in, struct deflate_index **built) {
   */
 
   for (int i = 0; i < index->have; i++) {
-    point_t& point = index->list[i];
+    point_t& point = (*index->list)[i];
 
     if (gzread(in, &point.out, sizeof(point.out)) != sizeof(point.out) ||
         gzread(in, &point.in, sizeof(point.in)) != sizeof(point.in) ||
@@ -449,7 +450,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
   if (index->have == index->mode) {
     // The list is full. Make it bigger.
     index->mode = index->mode ? index->mode << 1 : 8;
-    index->list.resize(index->mode);
+    index->list->resize(index->mode);
     fprintf(stderr, "mode: %d", index->mode);
     /*
     point_t *next =
@@ -463,7 +464,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
   }
 
   // Fill in the access point and increment how many we have.
-  point_t &next = index->list[index->have++];//(point_t *)(index->list) + index->have++;
+  point_t &next = (*index->list)[index->have++];//(point_t *)(index->list) + index->have++;
   if (index->have < 0) {
     // Overflowed the int!
     //deflate_index_free(index);
@@ -501,7 +502,7 @@ inline int deflate_index_build(FILE *in, off_t span,
     return Z_MEM_ERROR;
   index->have = 0;
   index->mode = 0; // entries in index->list allocation
-  index->list = std::vector<point_t>();
+  index->list = new std::vector<point_t>();
   index->strm.state = Z_NULL; // so inflateEnd() can work
 
   // Set up the inflation state.
@@ -616,7 +617,7 @@ inline ptrdiff_t deflate_index_extract_with_chunk_index(FILE *in, struct deflate
                                        off_t offset, off_t chunk_idx, unsigned char *buf,
                                        size_t len) {
   // Do a quick sanity check on the index.
-  if (index == nullptr || index->have < 1 || index->list[0].out != 0) {
+  if (index == nullptr || index->have < 1 || (*index->list)[0].out != 0) {
     std::cout << "zran: index is not ready" << std::endl;
     return Z_STREAM_ERROR;
   }
@@ -626,7 +627,7 @@ inline ptrdiff_t deflate_index_extract_with_chunk_index(FILE *in, struct deflate
     std::cout << "zran: nothing to extract" << std::endl;
     return 0;
   }
-  auto curr_point = (index->list.begin() + chunk_idx);
+  auto curr_point = (index->list->begin() + chunk_idx);
 
   // Initialize the input file and prime the inflate engine to start there.
   int ret = fseeko(in, curr_point->in - (curr_point->bits ? 1 : 0), SEEK_SET);
@@ -750,7 +751,7 @@ inline ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
                                        off_t offset, unsigned char *buf,
                                        size_t len) {
   // Do a quick sanity check on the index.
-  if (index == nullptr || index->have < 1 || index->list[0].out != 0) {
+  if (index == nullptr || index->have < 1 || (*index->list)[0].out != 0) {
     std::cout << "zran: index is not ready" << std::endl;
     return Z_STREAM_ERROR;
   }
@@ -763,7 +764,7 @@ inline ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
 
   // Find the access point closest to but not after offset.
   int lo = -1, hi = index->have;
-  std::vector<point_t>& point = index->list;//index.list;
+  std::vector<point_t>& point = *index->list;//index.list;
   while (hi - lo > 1) {
     int mid = (lo + hi) >> 1;
     if (offset < point[mid].out)
@@ -771,7 +772,7 @@ inline ptrdiff_t deflate_index_extract(FILE *in, struct deflate_index *index,
     else
       lo = mid;
   }
-  auto curr_point = (index->list.begin() + lo);
+  auto curr_point = (index->list->begin() + lo);
 
   // Initialize the input file and prime the inflate engine to start there.
   int ret = fseeko(in, curr_point->in - (curr_point->bits ? 1 : 0), SEEK_SET);
@@ -947,7 +948,7 @@ inline void build_index(const char *gzFile1, off_t span) {
   } else {
     // since `have` >= there must be a first element here
     decltype(index->have) current_access_index = 0;
-    point current_access_point = index->list[current_access_index];
+    point current_access_point = (*index->list)[current_access_index];
     off_t next_decomp_checkpoint = current_access_point.out;
     uint64_t record_start = 0;
     while (iss >> record) {
@@ -958,7 +959,7 @@ inline void build_index(const char *gzFile1, off_t span) {
         fprintf(stderr, "matched checkpoint %ld with record starting at %ld.\n", next_decomp_checkpoint, record_start);
         current_access_index += 1;
         if (current_access_index < index->have) {
-          current_access_point = index->list[current_access_index];
+          current_access_point = (*index->list)[current_access_index];
           next_decomp_checkpoint = current_access_point.out;
         }
       }
@@ -1006,7 +1007,7 @@ bool get_uncompressed_chunk(FILE *fptr, struct deflate_index* index, size_t chun
 
   // otherwise we can get the chunk
   // uncompressed byte offset at the start of the chunk
-  off_t chunk_start = index->list[chunk_idx].out;
+  off_t chunk_start = (*index->list)[chunk_idx].out;
   (void)chunk_start;
   // uncompressed byte offset at the start of the first read record in this chunk
   uint64_t rec_start = (*index->record_boundaries)[chunk_idx].byte_offset;
