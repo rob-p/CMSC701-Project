@@ -52,6 +52,7 @@ using namespace std;
 
 #define WINSIZE 32768U // sliding window size
 #define CHUNK 16384    // file input buffer size
+
 // Decompression modes. These are the inflateInit2() windowBits parameter.
 #define RAW -15
 #define ZLIB 15
@@ -94,7 +95,7 @@ struct deflate_index {
     have = -1;
     mode = -1;
     length = 0;
-    list = nullptr;//std::vector<point>();
+    list = nullptr;
     num_record_chunks = 0;
     total_record_count = 0;
   }
@@ -568,6 +569,7 @@ inline int deflate_index_build(FILE *in, off_t span,
       totout += before - index->strm.avail_out;
     }
 
+    //bool added_access_point = false;
     if ((index->strm.data_type & 0xc0) == 0x80 &&
         (index->have == 0 || totout - last >= span)) {
       // We are at the end of a header or a non-last deflate block, so we
@@ -576,12 +578,13 @@ inline int deflate_index_build(FILE *in, off_t span,
       // more uncompressed bytes since the last access point, so we want
       // to add an access point here.
       index = add_point(index, totin - index->strm.avail_in, totout, beg, win);
-      fprintf(stderr, "adding access point at %ld (read) %ld (written)\n", (totin - index->strm.avail_in), totout);
+      fprintf(stderr, "adding access point %ld at %ld (read) %ld (written); distance %ld vs span %ld.\n", index->have, (totin - index->strm.avail_in), totout, totout - last, span);
       if (index == nullptr) {
         ret = Z_MEM_ERROR;
         break;
       }
       last = totout;
+      //added_access_point = true;
     }
 
     if (ret == Z_STREAM_END && mode == GZIP &&
@@ -590,7 +593,9 @@ inline int deflate_index_build(FILE *in, off_t span,
       // inflate state to read another gzip member. On success, this will
       // set ret to Z_OK to continue decompressing.
       ret = inflateReset2(&index->strm, GZIP);
-      beg = totout; // reset history
+      //if (added_access_point) { 
+        beg = totout; // reset history
+      // }
     }
 
     // Keep going until Z_STREAM_END or error. If the compressed data ends

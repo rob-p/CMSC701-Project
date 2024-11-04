@@ -8,23 +8,20 @@ using namespace std;
 using namespace klibpp;
 
 int main(int argc, char **argv) {
-  // CLI::App app{"Build and use ffindices"};
-  // argv = ensure_utf8(argv);
+  CLI::App app{"Build and use ffindices"};
+  argv = app.ensure_utf8(argv);
 
-  if (argc <= 1) {
-    fprintf(stderr, "Command line arguments not provided\n");
-  }
-  if (strcmp(argv[1], "build") == 0) {
+  std::string fastqFile;
+  size_t span = 25'000'000;
+  CLI::App* build = app.add_subcommand("build", "build subcommand");
+  build->add_option<std::string>("fastq-path", fastqFile, "path to input fastq file.")->required();
+  build->add_option<size_t>("span", span, "span of uncompressed input bytes between checkpoints.")->required();
+  CLI11_PARSE(app, argc, argv);
+
+  {
     // build mode
     auto start = std::chrono::high_resolution_clock::now();
-    off_t span = 1048576L;
-    char *end2;
-    span = strtoll(argv[3], &end2, 0);
-    if (*end2) {
-      fprintf(stderr, "zran: invalid record_idx\n");
-      return 1;
-    }
-    build_index(argv[2], span);
+    build_index(fastqFile.c_str(), span);
     auto end = std::chrono::high_resolution_clock::now();
 
     // Calculate the duration in milliseconds
@@ -35,7 +32,8 @@ int main(int argc, char **argv) {
     std::cout << "Time taken to build index (total): " << duration2.count()
               << " milliseconds" << std::endl;
 
-  } else {
+  } 
+  /*{
     // use mode
     off_t record_idx = -1;
     off_t num_records = -1;
@@ -70,5 +68,6 @@ int main(int argc, char **argv) {
     //          cout << rec.seq << endl;
     //        }
   }
+  */
   return 0;
 }
