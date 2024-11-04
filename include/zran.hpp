@@ -452,7 +452,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
     // The list is full. Make it bigger.
     index->mode = index->mode ? index->mode << 1 : 8;
     index->list->resize(index->mode);
-    fprintf(stderr, "mode: %d", index->mode);
+    fprintf(stderr, "mode: %d, have: %ld\n", index->mode, index->have);
     /*
     point_t *next =
         (point_t *)realloc(index->list, sizeof(point_t) * index->mode);
@@ -467,6 +467,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
   // Fill in the access point and increment how many we have.
   point_t &next = (*index->list)[index->have++];//(point_t *)(index->list) + index->have++;
   if (index->have < 0) {
+    fprintf(stderr, "no, sparky; bad boy!\n");
     // Overflowed the int!
     //deflate_index_free(index);
     return nullptr;
@@ -477,6 +478,7 @@ static struct deflate_index *add_point(struct deflate_index *index, off_t in,
   next.dict = out - beg > WINSIZE ? WINSIZE : (unsigned)(out - beg);
   next.window = (unsigned char *)malloc(next.dict);
   if (next.window == nullptr) {
+    fprintf(stderr, "zran::add_checkpoint:: next.window == nullptr!\n");
     //deflate_index_free(index);
     return nullptr;
   }
@@ -961,7 +963,7 @@ inline void build_index(const char *gzFile1, off_t span) {
       if ((record_start >= static_cast<uint64_t>(next_decomp_checkpoint)) and (current_access_index < index->have)) {
         // distance from checkpoint to the record start
         index->record_boundaries->push_back({record_count, record_start});
-        fprintf(stderr, "matched checkpoint %ld with record starting at %ld.\n", next_decomp_checkpoint, record_start);
+        fprintf(stderr, "matched checkpoint %ld with record starting at %ld (record num %ld).\n", next_decomp_checkpoint, record_start, record_count);
         current_access_index += 1;
         if (current_access_index < index->have) {
           current_access_point = (*index->list)[current_access_index];
