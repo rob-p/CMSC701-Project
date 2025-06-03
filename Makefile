@@ -22,4 +22,4 @@ fqfeeder:
 all: main offsets
 
 clean:
-	rm -f zran.out offsets.out main.out countbases.out fqfeeder.out test_parser.out
+	rm -f zran.out offsets.out main.out countbases.out fqfeeder.out test_parser.out ffindex

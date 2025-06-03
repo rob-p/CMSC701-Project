@@ -11,7 +11,7 @@ int main(int argc, char **argv) {
   CLI::App app{"Build and use ffindices"};
   argv = app.ensure_utf8(argv);
 
-  std::string fastqFile;
+  std::string fastqFile = "./test-data/ecoli.fq.gzip";
   size_t span = 25'000'000;
   CLI::App* build = app.add_subcommand("build", "build subcommand");
   build->add_option<std::string>("fastq-path", fastqFile, "path to input fastq file.")->required();
