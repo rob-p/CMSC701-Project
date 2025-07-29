@@ -540,14 +540,19 @@ inline int deflate_index_build(FILE *in, off_t span,
   // Create and initialize the index list.
   struct deflate_index *index =
       (struct deflate_index *)malloc(sizeof(struct deflate_index));
-  if (index == nullptr)
+  
+  if (index == nullptr) {
     return Z_MEM_ERROR;
+  }
+
+  // Tom: Initialize number of access points.
   index->have = 0;
-  index->mode = 0; // entries in index->list allocation
+  index->mode = 0; // entries in index->list allocation (Tom: not sure what this)
   index->list = new std::vector<point_t>();
   index->strm.state = Z_NULL; // so inflateEnd() can work
 
   // Set up the inflation state.
+  // Tom: Available in and out of the next in and out is set.
   index->strm.avail_in = 0;
   index->strm.avail_out = 0;
   unsigned char buf[CHUNK];         // input buffer
@@ -563,9 +568,12 @@ inline int deflate_index_build(FILE *in, off_t span,
   do {
     // Assure available input, at least until reaching EOF.
     if (index->strm.avail_in == 0) {
+      // Tom: Reads in bytes with respect to the buffer size.
       index->strm.avail_in = fread(buf, 1, sizeof(buf), in);
       totin += index->strm.avail_in;
+      // Tom: Sets the buffer size to 16384.
       index->strm.next_in = buf;
+
       if (index->strm.avail_in < sizeof(buf) && ferror(in)) {
         ret = Z_ERRNO;
         break;
@@ -585,25 +593,30 @@ inline int deflate_index_build(FILE *in, off_t span,
         index->strm.zalloc = Z_NULL;
         index->strm.zfree = Z_NULL;
         index->strm.opaque = Z_NULL;
+
         ret = inflateInit2(&index->strm, mode);
-        if (ret != Z_OK)
+
+        if (ret != Z_OK) {
           break;
+        }
       }
     }
 
     // Assure available output. This rotates the output through, for use as
     // a sliding window on the uncompressed data.
     if (index->strm.avail_out == 0) {
+      // Tom: Sets the size of the output window to 32768.
       index->strm.avail_out = sizeof(win);
       index->strm.next_out = win;
     }
 
-    if (mode == RAW && index->have == 0)
+    // Tom: If mode is RAW and there are no access points.
+    if (mode == RAW && index->have == 0) {
       // We skip the inflate() call at the start of raw deflate data in
       // order generate an access point there. Set data_type to imitate
       // the end of a header.
       index->strm.data_type = 0x80;
-    else {
+    } else {
       // Inflate and update the number of uncompressed bytes.
       unsigned before = index->strm.avail_out;
       ret = inflate(&index->strm, Z_BLOCK);
@@ -618,12 +631,16 @@ inline int deflate_index_build(FILE *in, off_t span,
       // very start for the first access point, or there has been span or
       // more uncompressed bytes since the last access point, so we want
       // to add an access point here.
+      
+      // Tom: add_point() increments index->have by 1.
       index = add_point(index, totin - index->strm.avail_in, totout, beg, win);
       fprintf(stderr, "adding access point %ld at %ld (read) %ld (written); distance %ld vs span %ld.\n", index->have, (totin - index->strm.avail_in), totout, totout - last, span);
+      
       if (index == nullptr) {
         ret = Z_MEM_ERROR;
         break;
       }
+      
       last = totout;
       //added_access_point = true;
     }
@@ -635,7 +652,7 @@ inline int deflate_index_build(FILE *in, off_t span,
       // set ret to Z_OK to continue decompressing.
       ret = inflateReset2(&index->strm, GZIP);
       //if (added_access_point) { 
-        beg = totout; // reset history
+      beg = totout; // reset history
       // }
     }
 
@@ -975,6 +992,7 @@ inline void build_index(const char *gzFile1, off_t span) {
   // open the input gzipped FASTA/Q file
   FILE *in = fopen(gzFile1, "rb");
 
+  // Tom: Throw error if file pointer not present.
   if (in == nullptr) {
     std::stringstream ss;
     ss << "Could not open the given file [" << gzFile1 << "] for reading\n";
@@ -984,9 +1002,15 @@ inline void build_index(const char *gzFile1, off_t span) {
     return;
   }
 
+  // Tom: Initialize the index.
   struct deflate_index *index = nullptr;
+  // Tom: Built the index.
+  // Tom: This function does multiple things: Create the index and
+  //      returns the total amount of access points.  This should
+  //      be refactored for clarity. (Need to fix)
   int len = deflate_index_build(in, span, &index);
 
+  // Tom: Check if an error occurred when creating the index.
   if (len < 0) {
     fclose(in);
     switch (len) {
@@ -1012,13 +1036,18 @@ inline void build_index(const char *gzFile1, off_t span) {
   //print_index(index);
   fprintf(stderr, "Getting records boundaries from FASTQ file\n");
 
+  // Tom: Set stream of records from the zipped FASTQ.
   klibpp::KSeq record;
   klibpp::SeqStreamIn iss(gzFile1);
+  // Tom: Initialize chunk size amount.
   uint64_t RECORD_SPAN = 1000000;
 
+  // Tom: Initialize record boundaries.
   index->record_boundaries = new vector<record_checkpoint>();
+  // Tom: Set index chunk size.
   index->record_chunk_size = RECORD_SPAN;
 
+  // Tom: Initialize the record amount.
   size_t record_count = 0;
 
   // Tom: Does the TRUE statement occur when there is only a single
@@ -1026,46 +1055,71 @@ inline void build_index(const char *gzFile1, off_t span) {
   if (index->have == 0) {
     fprintf(stderr, "no access points created");
 
+    // Tom: Include the first record.
     index->record_boundaries->push_back({0, 0});
 
     while (iss >> record) {
       // Tom: last_record_start appears to do nothing.
+      // Tom: Refactor this out if it's an artifact. (Possible fix)
       auto last_record_start = record.bytes_offset;
       (void)last_record_start;
 
+      // Tom: Increment the amount of records.
       ++record_count;
     }
 
+    // Tom: Include the size of the only record with the singular
+    //      amount in record_count.
     index->record_boundaries->push_back({record_count, static_cast<uint64_t>(index->length)});
+    // Tom: Sets the number of chunks in the index to 1.
     index->num_record_chunks = 1;
   } else {
-    // since `have` >= there must be a first element here
+    // Tom: Else occurs when there are any amount of access points.
     decltype(index->have) current_access_index = 0;
     
+    // Tom: Gets first access point from index list of access points.
     point current_access_point = (*index->list)[current_access_index];
+    // Tom: Gets the offset in uncompressed data from the access point.
     off_t next_decomp_checkpoint = current_access_point.out;
+    // Tom: Initialize the record to start at.
     uint64_t record_start = 0;
 
+    // Tom: Read first record from stream.
     while (iss >> record) {
+      // Tom: Gets the byte offset of the record in the chunk.
       record_start = record.bytes_offset;
-
+      // Tom: If the record starts on or after the uncompressed data
+      //      offset AND the access point is less then the total 
+      //      access points.
       if ((record_start >= static_cast<uint64_t>(next_decomp_checkpoint)) and (current_access_index < index->have)) {
         // distance from checkpoint to the record start
+        // Tom: Stores the current record number and byte offset for
+        //      the record in the chunk.
         index->record_boundaries->push_back({record_count, record_start});
 
         fprintf(stderr, "matched checkpoint %ld with record starting at %ld (record num %ld).\n", next_decomp_checkpoint, record_start, record_count);
         
+        // Tom: Increment the index for access points by 1.
         current_access_index += 1;
 
+        // Tom: If current access index is less than total access points.
         if (current_access_index < index->have) {
+          // Tom: Get next access point from list of access points.
           current_access_point = (*index->list)[current_access_index];
+          // Tom: Gets the offset in uncompressed data from the access point.
           next_decomp_checkpoint = current_access_point.out;
         }
       }
+      
+      // Tom: Increment current record number.
       ++record_count;
     }
   
+    // Tom: This occurs twice if the index has no access points.
+    //      (Possible fix)
     index->record_boundaries->push_back({record_count, static_cast<uint64_t>(index->length)});
+    // Tom: Will the two following values ever not be the same?
+    //      (Research required)
     index->num_record_chunks = index->record_boundaries->size();
     index->total_record_count = record_count;
     
@@ -1077,6 +1131,7 @@ inline void build_index(const char *gzFile1, off_t span) {
   filename_gzip += ".index.gzip";
   
   fprintf(stderr, "zran: attempting to write index to %s\n", filename_gzip.c_str());
+  // Tom: Does idx_gzip need to be closed? (Research required)
   gzFile idx_gzip = gzopen(filename_gzip.c_str(), "wb");
 
   // Tom: Added additional error checking, not sure how to test it.
@@ -1091,6 +1146,8 @@ inline void build_index(const char *gzFile1, off_t span) {
   }
 
   // Write the index to the file.
+  // Tom: Use a different variable besides "len".  It's already used
+  //      for the size of the index. (Need to fix)
   len = deflate_index_save_gzip(idx_gzip, index);
 
   if (len != 0) {
