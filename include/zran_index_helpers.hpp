@@ -30,40 +30,16 @@ public:
     // Delete copy operations - z_stream cannot be safely copied
     ZStream(const ZStream&) = delete;
     ZStream& operator=(const ZStream&) = delete;
-    
     // Move constructor
-    ZStream(ZStream&& other) = delete; /*noexcept 
-        : stream_(other.stream_), initialized_(other.initialized_) {
-        other.initialized_ = false;
-        // Zero out the moved-from stream to prevent double-free
-        memset(&other.stream_, 0, sizeof(other.stream_));
-    }
-    */
-    
+    ZStream(ZStream&& other) = delete; 
+   
     // Move assignment
-    ZStream& operator=(ZStream&& other) = delete; /*(noexcept {
-        if (this != &other) {
-            // Clean up our current resources
-            cleanup();
-            
-            // Take ownership of other's resources
-            stream_ = other.stream_;
-            initialized_ = other.initialized_;
-            
-            // Leave other in a valid but empty state
-            other.initialized_ = false;
-            memset(&other.stream_, 0, sizeof(other.stream_));
-        }
-        return *this;
-    }*/
-    
+    ZStream& operator=(ZStream&& other) = delete; 
+
     z_stream* get() { return &stream_; }
     
     void init(int windowBits) {
-        fprintf(stderr, "ZStream::init called on %p, initialized_=%d\n", 
-                (void*)&stream_, initialized_);
         if (initialized_) {
-            fprintf(stderr, "  Calling inflateEnd before re-init\n");
             inflateEnd(&stream_);
         }
         int ret = inflateInit2(&stream_, windowBits);
@@ -71,7 +47,6 @@ public:
             throw std::runtime_error("Failed to initialize inflate stream");
         }
         initialized_ = true;
-        fprintf(stderr, "  inflateInit2 succeeded, stream now at %p\n", (void*)&stream_);
     }
     
     void setDictionary(const unsigned char* dict, size_t dictLen) {
@@ -82,7 +57,6 @@ public:
     }
     void cleanup() {
         if (initialized_) {
-            fprintf(stderr, "ZStream destructor: calling inflateEnd on %p\n", (void*)&stream_);
             inflateEnd(&stream_);
             initialized_ = false;
         }
@@ -90,8 +64,6 @@ public:
 private:
     z_stream stream_;
     bool initialized_;
-    
-    
 };
 
 /**
@@ -124,7 +96,6 @@ struct GzipStreamReader {
     }
 
     ~GzipStreamReader() {
-        fprintf(stderr, "GzipStreamReader destructor: closing file %p\n", (void*)file);
         if (file) fclose(file);
         // index is not owned by us, don't free it
     }
@@ -134,51 +105,9 @@ struct GzipStreamReader {
     GzipStreamReader& operator=(const GzipStreamReader&) = delete;
     
     // Move constructor
-    GzipStreamReader(GzipStreamReader&& other) = delete;/*noexcept
-        : file(other.file),
-          index(other.index),
-          zstream(std::move(other.zstream)),
-          uncompressed_offset(other.uncompressed_offset),
-          input_buffer_size(other.input_buffer_size),
-          input_buffer_pos(other.input_buffer_pos),
-          file_offset(other.file_offset),
-          bits_from_last_byte(other.bits_from_last_byte)
-    {
-        // Copy the input buffer
-        memcpy(input_buffer, other.input_buffer, sizeof(input_buffer));
-        
-        // Null out the moved-from object's file pointer
-        other.file = nullptr;
-        other.index = nullptr;
-        other.zstream.cleanup();
-    }*/
-    
+    GzipStreamReader(GzipStreamReader&& other) = delete;
     // Move assignment
-    GzipStreamReader& operator=(GzipStreamReader&& other) = delete; /*noexcept {
-        if (this != &other) {
-            // Clean up our current resources
-            if (file) fclose(file);
-            
-            // Take ownership of other's resources
-            file = other.file;
-            index = other.index;
-            zstream = std::move(other.zstream);
-            uncompressed_offset = other.uncompressed_offset;
-            input_buffer_size = other.input_buffer_size;
-            input_buffer_pos = other.input_buffer_pos;
-            file_offset = other.file_offset;
-            bits_from_last_byte = other.bits_from_last_byte;
-            
-            // Copy the input buffer
-            memcpy(input_buffer, other.input_buffer, sizeof(input_buffer));
-            
-            // Null out the moved-from object
-            other.file = nullptr;
-            other.index = nullptr;
-        }
-        return *this;
-    }
-    */
+    GzipStreamReader& operator=(GzipStreamReader&& other) = delete; 
 };
 
 /**
@@ -293,7 +222,6 @@ ptrdiff_t gzip_read(GzipStreamReader* reader, char* buffer, size_t len) {
                     // End of compressed data
                     break;
                 } else {
-                    fprintf(stderr, "File read error\n");
                     return -1;
                 }
             }
@@ -318,8 +246,6 @@ ptrdiff_t gzip_read(GzipStreamReader* reader, char* buffer, size_t len) {
             continue;
         } else {
             // Error occurred
-            fprintf(stderr, "inflate() error: %d (%s)\n", ret, 
-                    strm->msg ? strm->msg : "no message");
             if (ret == Z_NEED_DICT) {
                 fprintf(stderr, "Z_NEED_DICT - dictionary not set properly\n");
             } else if (ret == Z_DATA_ERROR) {
@@ -333,74 +259,8 @@ ptrdiff_t gzip_read(GzipStreamReader* reader, char* buffer, size_t len) {
     
     size_t bytes_produced = len - strm->avail_out;
     reader->uncompressed_offset += bytes_produced;
-    
     return bytes_produced;
 }
-
-/**
- * Read decompressed data from the stream.
- * Returns number of bytes read (0 = EOF, negative = error)
-ptrdiff_t gzip_read(GzipStreamReader* reader, unsigned char* buffer, size_t len, uint64_t token) {
-    if (!reader || !reader->file) {
-        std::cerr << "reader not open!\n";
-        return -1;
-    }
-
-    z_stream* strm = reader->zstream.get();
-    strm->avail_out = len;
-    strm->next_out = buffer;
-    
-    while (strm->avail_out > 0) {
-        if (token > 0) { std::cerr << "strm->avail_out=" << strm->avail_out << "\n"; }
-        // If we need more input data
-        if (strm->avail_in == 0) {
-            // Read more compressed data from file
-            size_t to_read = sizeof(reader->input_buffer);
-            size_t bytes_read = fread(reader->input_buffer, 1, to_read, reader->file);
-            
-            if (bytes_read == 0) {
-                if (feof(reader->file)) {
-                    // End of compressed data
-                    break;
-                } else {
-                    return -1;  // Read error
-                }
-            }
-            
-            reader->file_offset += bytes_read;
-            strm->avail_in = bytes_read;
-            strm->next_in = reader->input_buffer;
-        }
-
-        
-        // Decompress
-        int ret = inflate(strm, Z_NO_FLUSH);
-        
-        if (token > 0) { std::cerr << "after inflate strm->avail_out=" << strm->avail_out << "\n"; }
-
-        if (ret == Z_STREAM_END) {
-            // Finished decompressing
-            break;
-        } else if (ret != Z_OK) {
-            if (ret == Z_NEED_DICT) {
-                std::cerr << "Z_NEED_DICT!\n";
-                // This shouldn't happen since we set the dictionary
-                return -1;
-            } else if (ret == Z_DATA_ERROR || ret == Z_MEM_ERROR) {
-                if (ret == Z_DATA_ERROR) { std::cerr << "Z_DATA_ERROR\n"; }
-                if (ret == Z_MEM_ERROR) { std::cerr << "Z_MEM_ERROR!\n"; }
-                return -1;
-            }
-        }
-    }
-    
-    size_t bytes_produced = len - strm->avail_out;
-    reader->uncompressed_offset += bytes_produced;
-    
-    return bytes_produced;
-}
-
- */
 
 #endif //ZRAN_INDEX_HELPERS_HPP
 

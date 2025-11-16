@@ -8,8 +8,8 @@ offsets: offsets.cpp
 	$(CC) -std=c++17 -Wall -O3 -o offsets.out offsets.cpp -I ./ -I ./include/ -L ./ -lz
 
 test_parser: test_parser.cpp
-	$(CC) -std=c++17 -fsanitize=address -g -Wall -O3 -o test_parser.out test_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
-	#$(CC) -std=c++17 -Wall -O3 -o test_parser.out test_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
+	#$(CC) -std=c++17 -fsanitize=address -g -Wall -O3 -o test_parser.out test_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
+	$(CC) -std=c++17 -Wall -O3 -o test_parser.out test_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread
 
 test_serial_parser: test_serial_parser.cpp
 	$(CC) -std=c++17 -Wall -O3 -o test_serial_parser.out test_serial_parser.cpp -I ./ -I ./include/ -L ./ -lz -lpthread

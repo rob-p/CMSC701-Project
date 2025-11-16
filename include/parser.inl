@@ -21,21 +21,22 @@ uint64_t ParrFQParser::get_num_reads() {
   return m_index->total_record_count;
 }
 
-std::unique_ptr<ReadChunk> ParrFQParser::get_read_chunk() {
+std::optional<ReadChunk> ParrFQParser::get_read_chunk() {
   uint64_t curr_token = token_counter_.fetch_add(1);
   struct deflate_index* idx = m_index.get();
-  return (curr_token >= m_numThreads) ? nullptr : std::make_unique<ReadChunk>(m_fastqFilename, idx, curr_token, chunk_ranges_[curr_token]);
+  return (curr_token >= m_numThreads) ? nullopt : std::make_optional<ReadChunk>(m_fastqFilename, idx, curr_token, chunk_ranges_[curr_token]);
 }
 
 // takes a read chunk, given to us by an underlying 
 // consumer thread, and fills it.
-bool ParrFQParser::refill(ReadChunk& tlc) {
+/*bool ParrFQParser::refill(ReadChunk& tlc) {
   if (tlc.token_ >= m_numThreads) {
     std::cerr << "invalid worker token (" << tlc.token_ << "), but only " << m_numThreads << " workers were registered.\n";
     return false;
   }
   return tlc.refill();
 }
+*/
 
 // Distributes N items among M threads in contiguous chunks
 // Minimizes the maximum chunk size (load balancing)

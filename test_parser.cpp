@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
     option::Lead{"█"},
     option::Remainder{"-"},
     option::End{"]"},
-    option::MaxProgress{parser.get_num_chunks()},
+    option::MaxProgress{parser.get_num_reads() / 1000},
     option::ForegroundColor{Color::yellow},
     option::ShowElapsedTime{true},
     option::ShowRemainingTime{true},
@@ -58,19 +58,19 @@ int main(int argc, char* argv[]) {
   std::atomic<size_t> ctr{0};
   for (size_t i = 0; i < nt; ++i) {
     readers.emplace_back([&, i]() {
-      auto rgp = parser.get_read_chunk();
-      if (!rgp) {
+      auto rg = parser.get_read_chunk();
+      if (!rg) {
         return 1;
       }
-      ReadChunk* rg = rgp.release();
+      //ReadChunk* rg = rgp.release();
       //auto rg = std::move(rgo.value());
       //rgo.reset();
       klibpp::KSeq seq;
       uint64_t cur_rec{0};
-      while (parser.refill(*rg)) {
-            bar.tick();
+      //while (parser.refill(*rg)) {
         //auto& seq_stream = rg->get_seq_stream();
         while (*rg >> seq) { 
+            if (cur_rec > 0 && cur_rec % 1000 == 0) { bar.tick(); }
             //std::cerr << "rec : " << j << " / " << expected_rec << "\n";
             ++cur_rec;
             for (size_t j = 0; j < seq.seq.length(); ++j) {
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
         ctr += cur_rec; 
         cur_rec = 0;
 
-      }
+      //}
       return 0;
     });
   }
