@@ -580,7 +580,9 @@ inline int deflate_index_build(FILE *in, off_t span,
       // more uncompressed bytes since the last access point, so we want
       // to add an access point here.
       index = add_point(index, totin - index->strm.avail_in, totout, beg, win);
-      fprintf(stderr, "adding access point %ld at %ld (read) %ld (written); distance %ld vs span %ld.\n", index->have, (totin - index->strm.avail_in), totout, totout - last, span);
+      if (index->have % 100 == 0) {
+        fprintf(stderr, "adding access point %ld at %ld (read) %ld (written); distance %ld vs span %ld.\n", index->have, (totin - index->strm.avail_in), totout, totout - last, span);
+      }
       if (index == nullptr) {
         ret = Z_MEM_ERROR;
         break;
@@ -962,8 +964,10 @@ inline void build_index(const char *gzFile1, off_t span) {
       record_start = record.bytes_offset;
       if ((record_start >= static_cast<uint64_t>(next_decomp_checkpoint)) and (current_access_index < index->have)) {
         // distance from checkpoint to the record start
+        if (index->record_boundaries->size() % 100 == 0) {
+          fprintf(stderr, "matched checkpoint %ld with record starting at %ld (record num %ld).\n", next_decomp_checkpoint, record_start, record_count);
+        }
         index->record_boundaries->push_back({record_count, record_start});
-        fprintf(stderr, "matched checkpoint %ld with record starting at %ld (record num %ld).\n", next_decomp_checkpoint, record_start, record_count);
         current_access_index += 1;
         if (current_access_index < index->have) {
           current_access_point = (*index->list)[current_access_index];

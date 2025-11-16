@@ -51,19 +51,26 @@ int main(int argc, char* argv[]) {
     option::FontStyles{std::vector<FontStyle>{FontStyle::bold}}
   };
 
+  std::cerr << "NUMBER OF READS " << parser.get_num_reads() << "\n";
 
   std::vector<std::thread> readers;
   std::vector<Bases> counters(nt, {0, 0, 0, 0});
   std::atomic<size_t> ctr{0};
   for (size_t i = 0; i < nt; ++i) {
     readers.emplace_back([&, i]() {
-      auto rg = parser.get_read_chunk();
+      auto rgp = parser.get_read_chunk();
+      if (!rgp) {
+        return 1;
+      }
+      ReadChunk* rg = rgp.release();
+      //auto rg = std::move(rgo.value());
+      //rgo.reset();
       klibpp::KSeq seq;
       uint64_t cur_rec{0};
-      while (parser.refill(rg)) {
-        bar.tick();
-        auto& seq_stream = rg.get_seq_stream();
-        while (seq_stream >> seq) { 
+      while (parser.refill(*rg)) {
+            bar.tick();
+        //auto& seq_stream = rg->get_seq_stream();
+        while (*rg >> seq) { 
             //std::cerr << "rec : " << j << " / " << expected_rec << "\n";
             ++cur_rec;
             for (size_t j = 0; j < seq.seq.length(); ++j) {
@@ -86,15 +93,18 @@ int main(int argc, char* argv[]) {
               }
             }
         }
-        if (cur_rec != rg.expected_rec) {
+        /*
+        if (cur_rec != rg->expected_rec) {
           std::cerr << "CHUNK NUM : " << rg.chunk_num << ", observed rec : " << cur_rec << ", expected rec : " << rg.expected_rec << "\n";
           std::cerr << "last_name: " << seq.name << ", seq : " << seq.seq << "\n";
         }
+        */
 
         ctr += cur_rec; 
         cur_rec = 0;
 
       }
+      return 0;
     });
   }
 

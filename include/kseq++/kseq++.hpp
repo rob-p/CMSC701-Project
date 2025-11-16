@@ -584,6 +584,8 @@ namespace klibpp {
         {
           return this->err() || this->tqs() || ( this->eof() && !this->last );
         }
+        
+        inline void set_eof() { this->is_eof = true; }
 
           inline KStream&
         operator>>( KSeq& rec )  // kseq_read
